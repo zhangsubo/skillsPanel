@@ -1,0 +1,204 @@
+import { invoke } from '@tauri-apps/api/core';
+
+function isTauriEnv(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+const MOCK_COMMANDS: Record<string, (args?: Record<string, unknown>) => unknown> = {
+  get_library: () => [],
+  get_tools: () => [
+    { id: 'cursor', name: 'cursor', path: '/Users/demo/.cursor', enabled: true, is_custom: false },
+    { id: 'claude', name: 'claude', path: '/Users/demo/.claude', enabled: true, is_custom: false },
+    { id: 'trae', name: 'trae', path: '/Users/demo/.trae', enabled: true, is_custom: false },
+    { id: 'copilot', name: 'copilot', path: '/Users/demo/.github-copilot', enabled: true, is_custom: false },
+    { id: 'codex', name: 'codex', path: '/Users/demo/.codex', enabled: false, is_custom: false },
+  ],
+  get_config: () => JSON.stringify({
+    library_path: '~/.skills-panel/skills',
+    tools: [
+      { id: 'opencode', name: 'OpenCode', path: '~/.config/opencode/skill', enabled: true, is_custom: false },
+      { id: 'antigravity', name: 'Antigravity', path: '~/.antigravity/skills', enabled: true, is_custom: false },
+      { id: 'codex', name: 'Codex', path: '~/.codex/skills', enabled: true, is_custom: false },
+      { id: 'trae', name: 'Trae', path: '~/.trae/skills', enabled: true, is_custom: false },
+      { id: 'gemini-cli', name: 'Gemini CLI', path: '~/.gemini/skills', enabled: true, is_custom: false },
+      { id: 'hermes', name: 'Hermes', path: '~/.hermes/skills', enabled: true, is_custom: false },
+      { id: 'openclaw', name: 'OpenClaw', path: '~/.openclaw/skills', enabled: false, is_custom: false },
+    ],
+    sources: [],
+    sync: { mode: 'symlink' },
+    install: { allow_zip: true, allow_git: true, default_sync_targets: [] },
+    exclude_paths: ['node_modules', '.git', 'dist', 'coverage'],
+    rules: { tools: {}, groups: {}, skills: {} },
+    deleted_skills: [],
+  }),
+  get_audit_logs: () => [],
+  scan_skills: () => {
+    const mockSkills = [
+      { name: 'file-organizer', desc: '自动整理和分类文件，支持按日期、类型、标签等多种规则组织文件系统', paths: ['/Users/demo/.hermes/skills/productivity/file-organizer'] },
+      { name: 'git-helper', desc: 'Git 工作流自动化工具，支持分支管理、提交规范检查和冲突解决建议', paths: ['/Users/demo/.hermes/skills/devops/git-helper', '/Users/demo/.trae/skills/git-helper'] },
+      { name: 'code-reviewer', desc: '智能代码审查助手，基于 AST 分析提供代码质量建议和潜在 Bug 检测', paths: ['/Users/demo/.hermes/skills/dev/code-reviewer'] },
+      { name: 'airtable-sync', desc: 'Airtable 数据同步工具，支持双向同步、字段映射和自动冲突解决', paths: ['/Users/demo/.hermes/skills/productivity/airtable-sync'] },
+      { name: 'apple-notes', desc: '苹果备忘录集成工具，支持读取、创建和搜索备忘录内容', paths: ['/Users/demo/.hermes/skills/productivity/apple-notes', '/Users/demo/.cursor/skills/apple-notes'] },
+      { name: 'slack-bot', desc: 'Slack 机器人框架，支持消息发送、频道管理和 webhook 处理', paths: ['/Users/demo/.hermes/skills/communication/slack-bot'] },
+      { name: 'discord-webhook', desc: 'Discord Webhook 管理工具，支持消息模板、富文本和嵌入消息发送', paths: ['/Users/demo/.hermes/skills/communication/discord-webhook'] },
+      { name: 'github-actions', desc: 'GitHub Actions 工作流生成器，支持 CI/CD 模板和自定义 action 组合', paths: ['/Users/demo/.hermes/skills/devops/github-actions', '/Users/demo/.trae/skills/github-actions'] },
+      { name: 'docker-compose', desc: 'Docker Compose 配置管理工具，支持多环境配置和一键启动脚本生成', paths: ['/Users/demo/.hermes/skills/devops/docker-compose'] },
+      { name: 'kubernetes-helper', desc: 'Kubernetes 集群管理助手，支持 Pod 查看、日志收集和资源监控', paths: ['/Users/demo/.hermes/skills/devops/kubernetes-helper'] },
+      { name: 'aws-cli', desc: 'AWS CLI 封装工具，提供常用 S3、EC2、Lambda 操作的快捷命令', paths: ['/Users/demo/.hermes/skills/cloud/aws-cli'] },
+      { name: 'terraform-tool', desc: 'Terraform 基础设施即代码助手，支持状态管理和模块依赖分析', paths: ['/Users/demo/.hermes/skills/cloud/terraform-tool'] },
+      { name: 'nginx-config', desc: 'Nginx 配置生成器和验证工具，支持反向代理、负载均衡和 SSL 配置', paths: ['/Users/demo/.hermes/skills/devops/nginx-config'] },
+      { name: 'mysql-backup', desc: 'MySQL 数据库备份和恢复工具，支持增量备份、定时任务和云存储同步', paths: ['/Users/demo/.hermes/skills/database/mysql-backup'] },
+      { name: 'redis-manager', desc: 'Redis 缓存管理工具，支持键值查看、内存分析和性能监控', paths: ['/Users/demo/.hermes/skills/database/redis-manager'] },
+      { name: 'elasticsearch-query', desc: 'Elasticsearch 查询构建器，支持 DSL 生成、聚合分析和索引管理', paths: ['/Users/demo/.hermes/skills/database/elasticsearch-query'] },
+      { name: 'prometheus-alert', desc: 'Prometheus 告警规则管理工具，支持告警模板和通知渠道配置', paths: ['/Users/demo/.hermes/skills/monitoring/prometheus-alert'] },
+      { name: 'grafana-dashboard', desc: 'Grafana 仪表盘生成器，支持多种数据源和可视化面板模板', paths: ['/Users/demo/.hermes/skills/monitoring/grafana-dashboard'] },
+      { name: 'jenkins-pipeline', desc: 'Jenkins Pipeline 脚本生成器，支持多分支流水线和并行任务配置', paths: ['/Users/demo/.hermes/skills/devops/jenkins-pipeline'] },
+      { name: 'gitlab-ci', desc: 'GitLab CI/CD 配置助手，支持模板库和跨项目流水线触发', paths: ['/Users/demo/.hermes/skills/devops/gitlab-ci'] },
+      { name: 'npm-publish', desc: 'NPM 包发布助手，支持版本管理、标签发布和私有仓库配置', paths: ['/Users/demo/.hermes/skills/package/npm-publish'] },
+      { name: 'webpack-config', desc: 'Webpack 配置优化工具，支持性能分析、代码分割和懒加载策略', paths: ['/Users/demo/.hermes/skills/build/webpack-config'] },
+      { name: 'jest-test', desc: 'Jest 测试框架助手，支持快照测试、覆盖率报告和并行执行优化', paths: ['/Users/demo/.hermes/skills/testing/jest-test'] },
+      { name: 'eslint-plugin', desc: 'ESLint 规则配置工具，支持自定义规则集和自动修复建议', paths: ['/Users/demo/.hermes/skills/lint/eslint-plugin'] },
+      { name: 'prettier-format', desc: 'Prettier 格式化配置管理器，支持多语言和团队统一风格配置', paths: ['/Users/demo/.hermes/skills/lint/prettier-format'] },
+      { name: 'typescript-check', desc: 'TypeScript 类型检查助手，支持严格模式配置和类型推断优化', paths: ['/Users/demo/.hermes/skills/lint/typescript-check'] },
+      { name: 'markdown-render', desc: 'Markdown 渲染和转换工具，支持表格、图表和数学公式渲染', paths: ['/Users/demo/.hermes/skills/doc/markdown-render'] },
+      { name: 'pdf-generator', desc: 'PDF 文档生成器，支持模板引擎、页眉页脚和水印添加', paths: ['/Users/demo/.hermes/skills/doc/pdf-generator'] },
+      { name: 'image-compress', desc: '图片压缩优化工具，支持多种格式和批量处理，保持视觉质量', paths: ['/Users/demo/.hermes/skills/media/image-compress'] },
+      { name: 'video-convert', desc: '视频格式转换器，支持主流编解码器和分辨率自适应调整', paths: ['/Users/demo/.hermes/skills/media/video-convert'] },
+    ];
+
+    const toolNames = ['cursor', 'claude', 'trae', 'copilot', 'codex'];
+
+    const skills = mockSkills.map((skill, index) => {
+      const linkedCount = Math.min(Math.floor(Math.random() * 4) + 1, toolNames.length);
+      const statuses: Record<string, string> = {};
+      const shuffled = [...toolNames].sort(() => Math.random() - 0.5);
+      for (let i = 0; i < linkedCount; i++) {
+        statuses[shuffled[i]] = 'linked';
+      }
+
+      return {
+        skill: {
+          id: `skill-${index + 1}`,
+          name: skill.name,
+          path_hash: `hash${index + 1}`,
+          library_path: skill.paths[0],
+          original_source_path: skill.paths.length > 1 ? skill.paths[1] : null,
+          original_git_url: null,
+          original_git_subpath: null,
+          group: 'default',
+          description: skill.desc,
+          frontmatter: {},
+          created_at: new Date().toISOString(),
+          mtime_ms: Date.now(),
+          source_type: 'local-folder' as const,
+          is_deleted: false,
+        },
+        tool_statuses: statuses,
+        rule_decisions: {},
+      };
+    });
+
+    return {
+      skills,
+      total_skills: skills.length,
+      total_tools: 5,
+      linked_count: 12,
+      conflict_count: 3,
+      blocked_count: 2,
+    };
+  },
+  get_skill_content: () => '# Skill\n\nMock content for development.',
+  preview_local_install: () => [
+    {
+      candidate_id: 'mock-1',
+      detected_name: 'file-organizer',
+      user_name_override: null,
+      description: 'A skill for organizing files automatically',
+      source_path: '/Users/demo/skills/file-organizer',
+      skill_root: '.',
+      valid: true,
+      error: null,
+    },
+    {
+      candidate_id: 'mock-2',
+      detected_name: 'git-helper',
+      user_name_override: null,
+      description: 'Git workflow automation skill',
+      source_path: '/Users/demo/skills/git-helper',
+      skill_root: '.',
+      valid: true,
+      error: null,
+    },
+    {
+      candidate_id: 'mock-3',
+      detected_name: 'code-reviewer',
+      user_name_override: null,
+      description: null,
+      source_path: '/Users/demo/skills/code-reviewer',
+      skill_root: '.',
+      valid: false,
+      error: 'Missing SKILL.md',
+    },
+  ],
+  log_message: () => undefined,
+  get_app_logs: () => [],
+  install_local_skill: () => '/mock/library/file-organizer',
+  link_skill: () => undefined,
+  unlink_skill: () => undefined,
+  delete_skill: () => undefined,
+  batch_delete_skills: (args) => {
+    const names = (args as Record<string, unknown>)?.skillNames as string[] | undefined;
+    return names?.length ?? 0;
+  },
+  update_config: () => undefined,
+};
+
+function logToBackend(level: string, message: string, source: string): void {
+  if (isTauriEnv()) {
+    invoke('log_message', { level, message, source }).catch(() => {
+      // Silently ignore log failures to avoid infinite loops
+    });
+  }
+}
+
+export async function invokeCommand<T>(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
+  if (!isTauriEnv()) {
+    const mock = MOCK_COMMANDS[cmd];
+    if (mock) {
+      return Promise.resolve(mock(args) as T);
+    }
+    throw new Error(
+      `Tauri command "${cmd}" is not available in browser mode. ` +
+        `Please run the app via "npm run tauri dev" for full functionality.`,
+    );
+  }
+
+  logToBackend('debug', `invoke ${cmd} args=${JSON.stringify(args)}`, 'frontend:invoke');
+
+  try {
+    const result = await invoke<T>(cmd, args);
+    logToBackend('debug', `invoke ${cmd} OK`, 'frontend:invoke');
+    return result;
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : String(error);
+    logToBackend('error', `invoke ${cmd} failed: ${message}`, 'frontend:invoke');
+    throw new Error(`Tauri command "${cmd}" failed: ${message}`);
+  }
+}
+
+export function toSnakeCase(args: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    result[snakeKey] = value;
+  }
+  return result;
+}
