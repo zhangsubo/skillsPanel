@@ -31,6 +31,11 @@ pub fn run() {
             let database_path = default_config.library_path.parent()
                 .unwrap_or(&default_config.library_path)
                 .join("skills_panel.db");
+
+            if let Some(parent) = database_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+
             let database = Database::new(&database_path)?;
 
             let mut config = load_config_from_db(&database)
