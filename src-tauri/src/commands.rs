@@ -450,7 +450,7 @@ pub fn batch_export_skills(
 pub fn batch_delete_skills(
     state: State<'_, SharedState>,
     skill_names: Vec<String>,
-    delete_symlinks: bool,
+    _delete_symlinks: bool,
 ) -> Result<usize, AppError> {
     let state = state.lock().unwrap();
     let library = state.library.lock().unwrap();
@@ -459,13 +459,11 @@ pub fn batch_delete_skills(
     let db_repo = crate::core::database::SkillsRepository::new(&database);
     let mut count = 0;
     for name in &skill_names {
-        if delete_symlinks {
-            for tool in &config.tools {
-                let _ = crate::core::linker::Linker::unlink(std::path::Path::new(&tool.path), name);
-            }
+        for tool in &config.tools {
+            let _ = crate::core::linker::Linker::unlink(std::path::Path::new(&tool.path), name);
         }
         if library.remove_skill(name).is_ok() {
-            let _ = db_repo.mark_uninstalled(name);
+            let _ = db_repo.delete_by_name(name);
             count += 1;
         }
     }
@@ -522,10 +520,17 @@ pub fn delete_skill(
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
     let library = state.library.lock().unwrap();
+    let config = state.config.lock().unwrap();
     let database = state.database.lock().unwrap();
+
+    for tool in &config.tools {
+        let _ = crate::core::linker::Linker::unlink(std::path::Path::new(&tool.path), &skill_name);
+    }
+
     library.remove_skill(&skill_name)?;
+
     let repo = crate::core::database::SkillsRepository::new(&database);
-    let _ = repo.mark_uninstalled(&skill_name);
+    repo.delete_by_name(&skill_name)?;
     Ok(())
 }
 

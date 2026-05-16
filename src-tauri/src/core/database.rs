@@ -378,6 +378,13 @@ impl<'a> SkillsRepository<'a> {
         Ok(())
     }
 
+    pub fn delete_by_name(&self, skill_name: &str) -> Result<(), AppError> {
+        let conn = self.db.connection();
+        conn.execute("DELETE FROM skills WHERE name = ?1", params![skill_name])
+            .map_err(|e| AppError::Config(format!("Failed to delete skill: {}", e)))?;
+        Ok(())
+    }
+
     pub fn get_skill_id_by_name(&self, name: &str) -> Result<Option<String>, AppError> {
         let conn = self.db.connection();
         let result = conn
@@ -475,7 +482,7 @@ impl<'a> SkillsRepository<'a> {
         let conn = self.db.connection();
         let mut stmt = conn
             .prepare(
-                "DELETE FROM skills WHERE last_seen_at < ?1
+                "UPDATE skills SET is_deleted = 1 WHERE last_seen_at < ?1 AND is_deleted = 0
                  RETURNING id",
             )
             .map_err(|e| AppError::Config(format!("Failed to prepare delete query: {}", e)))?;
@@ -1255,5 +1262,113 @@ mod tests {
         // Mark missing as deleted
         let deleted = repo.mark_missing_as_deleted(ts2).unwrap();
         assert!(deleted.is_empty()); // scan-1 was seen at ts2, so not deleted
+    }
+
+    #[test]
+    fn test_mark_missing_as_deleted_is_soft_delete() {
+        let db = create_test_database();
+        let repo = SkillsRepository::new(&db);
+
+        let skill = Skill {
+            id: "soft-delete-test".to_string(),
+            name: "soft-delete-test".to_string(),
+            path_hash: "hash_sd".to_string(),
+            library_path: "/test".to_string(),
+            original_source_path: Some("/source".to_string()),
+            original_git_url: None,
+            original_git_subpath: None,
+            group: "default".to_string(),
+            description: "Soft delete test".to_string(),
+            frontmatter: HashMap::new(),
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            mtime_ms: 0,
+            source_type: SkillSourceType::LocalFolder,
+            is_deleted: false,
+            content_hash: None,
+        };
+
+        // Use upsert_with_scan so we control last_seen_at
+        let ts_insert = "2024-01-01T00:00:00Z";
+        repo.upsert_with_scan(&skill, ts_insert).unwrap();
+        repo.mark_installed("soft-delete-test").unwrap();
+
+        // Simulate a later scan where this skill is NOT seen
+        let ts_later = "2024-06-01T00:00:00Z";
+        let deleted_ids = repo.mark_missing_as_deleted(ts_later).unwrap();
+        assert_eq!(deleted_ids.len(), 1, "Skill should be soft-deleted");
+        assert_eq!(deleted_ids[0], "soft-delete-test");
+
+        // Verify: row still exists but is_deleted = 1
+        let conn = db.connection();
+        let is_deleted: i32 = conn
+            .query_row(
+                "SELECT is_deleted FROM skills WHERE id = ?1",
+                params!["soft-delete-test"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(is_deleted, 1, "Skill should be soft-deleted (is_deleted=1), not hard-deleted");
+
+        // Verify: get_installed() should NOT return it
+        let installed = repo.get_installed().unwrap();
+        assert!(installed.is_empty(), "Soft-deleted skill should not appear as installed");
+    }
+
+    #[test]
+    fn test_delete_by_name_hard_delete_cascades_links() {
+        let db = create_test_database();
+        let skills_repo = SkillsRepository::new(&db);
+        let tools_repo = ToolsRepository::new(&db);
+        let links_repo = LinksRepository::new(&db);
+
+        let skill = Skill {
+            id: "hard-del-1".to_string(),
+            name: "hard-del".to_string(),
+            path_hash: "h1".to_string(),
+            library_path: "/test".to_string(),
+            original_source_path: None,
+            original_git_url: None,
+            original_git_subpath: None,
+            group: "default".to_string(),
+            description: "".to_string(),
+            frontmatter: HashMap::new(),
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            mtime_ms: 0,
+            source_type: SkillSourceType::LocalFolder,
+            is_deleted: false,
+            content_hash: None,
+        };
+        skills_repo.upsert(&skill).unwrap();
+
+        let tool = Tool {
+            id: "tool-a".to_string(),
+            name: "Tool A".to_string(),
+            path: "/tools/a".to_string(),
+            enabled: true,
+            is_custom: false,
+        };
+        tools_repo.upsert(&tool).unwrap();
+        links_repo.link("tool-a", "hard-del-1").unwrap();
+
+        skills_repo.delete_by_name("hard-del").unwrap();
+
+        let conn = db.connection();
+        let skill_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM skills WHERE id = ?1",
+                params!["hard-del-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(skill_count, 0, "Skill row should be physically removed");
+
+        let link_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tool_skill_links WHERE skill_id = ?1",
+                params!["hard-del-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(link_count, 0, "tool_skill_links should be cascade-deleted");
     }
 }

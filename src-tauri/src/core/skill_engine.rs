@@ -146,9 +146,9 @@ SkillSource::Git { url, subpath } => {
         metadata: &SkillMetadata,
         library: &SkillLibrary,
     ) -> Result<Skill, AppError> {
-        let skill_id = SkillLibrary::compute_skill_id(&metadata.name, &metadata.skill_root);
-        let path_hash = SkillLibrary::compute_path_hash(&metadata.skill_root);
         let library_path = library.skill_path(&metadata.name);
+        let skill_id = SkillLibrary::compute_skill_id(&metadata.name, &library_path);
+        let path_hash = SkillLibrary::compute_path_hash(&library_path);
         
         Ok(Skill {
             id: skill_id,
@@ -519,15 +519,132 @@ mod tests {
     #[test]
     fn test_infer_source() {
         let temp = TempDir::new().unwrap();
-        
+
         let folder_path = temp.path().join("folder");
         fs::create_dir(&folder_path).unwrap();
         let source = SkillEngine::infer_source(&folder_path);
         assert!(matches!(source, SkillSource::Folder(_)));
-        
+
         let zip_path = temp.path().join("test.zip");
         fs::write(&zip_path, b"PK\x03\x04").unwrap();
         let source = SkillEngine::infer_source(&zip_path);
         assert!(matches!(source, SkillSource::Zip(_)));
+    }
+
+    /// Core regression test: skill ID must be computed from the library path,
+    /// not the temp/source path, so that the scanner can find the same skill later.
+    #[test]
+    fn test_create_skill_id_matches_scanner_id() {
+        use crate::core::config::AppConfig;
+        use crate::core::models::SyncConfig;
+
+        let temp = TempDir::new().unwrap();
+        let config = AppConfig {
+            library_path: temp.path().join("library"),
+            tools: vec![],
+            sources: vec![],
+            sync: SyncConfig { mode: crate::core::models::SyncMode::Symlink },
+            install: crate::core::models::InstallConfig { allow_zip: true, allow_git: true, default_sync_targets: vec![] },
+            exclude_paths: vec![],
+            rules: crate::core::models::RulesConfig::default(),
+            deleted_skills: vec![],
+        };
+        let library = SkillLibrary::new(&config).unwrap();
+
+        // Simulate a source in a temp directory (like git clone)
+        let source_dir = temp.path().join("tmp-clone/my-skill");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::write(source_dir.join("SKILL.md"), "---\nname: my-skill\ndescription: test\n---").unwrap();
+
+        let metadata = SkillEngine::parse_skill_metadata(&source_dir, SkillSourceType::Git).unwrap();
+        let skill = SkillEngine::create_skill_from_metadata(&metadata, &library).unwrap();
+
+        // The scanner discovers the skill from the library path, not the source path
+        let library_path = library.skill_path(&metadata.name);
+        let scanner_id = SkillLibrary::compute_skill_id(&metadata.name, &library_path);
+
+        assert_eq!(
+            skill.id, scanner_id,
+            "Skill ID from install ({}) must match scanner ID ({}) computed from library path",
+            skill.id, scanner_id
+        );
+    }
+
+    /// End-to-end test: install a skill, then simulate a scan — the skill
+    /// must remain installed (is_installed = 1) after the scan.
+    #[test]
+    fn test_install_then_scan_preserves_installed_status() {
+        use crate::core::config::AppConfig;
+        use crate::core::database::Database;
+        use crate::core::models::SyncConfig;
+        use rusqlite::params;
+
+        let temp = TempDir::new().unwrap();
+        let config = AppConfig {
+            library_path: temp.path().join("library"),
+            tools: vec![],
+            sources: vec![],
+            sync: SyncConfig { mode: crate::core::models::SyncMode::Symlink },
+            install: crate::core::models::InstallConfig { allow_zip: true, allow_git: true, default_sync_targets: vec![] },
+            exclude_paths: vec![],
+            rules: crate::core::models::RulesConfig::default(),
+            deleted_skills: vec![],
+        };
+        let library = SkillLibrary::new(&config).unwrap();
+        let db = Database::new(&temp.path().join("test.db")).unwrap();
+
+        // 1. Create a skill source and install it
+        let source_dir = temp.path().join("source/my-skill");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::write(source_dir.join("SKILL.md"), "---\nname: my-skill\ndescription: test\n---").unwrap();
+
+        let metadata = SkillEngine::parse_skill_metadata(&source_dir, SkillSourceType::Git).unwrap();
+        let skill = SkillEngine::create_skill_from_metadata(&metadata, &library).unwrap();
+        SkillEngine::persist_skill(&skill, &db).unwrap();
+
+        // Verify it's installed
+        let repo = crate::core::database::SkillsRepository::new(&db);
+        let installed = repo.get_installed().unwrap();
+        assert_eq!(installed.len(), 1, "Skill should be installed after persist");
+        assert_eq!(installed[0].id, skill.id);
+
+        // 2. Simulate a scan: copy skill to library, then scan
+        library.add_skill(&source_dir, &metadata.name).unwrap();
+        let scan_ts = "2024-06-01T00:00:00Z";
+
+        // The scanner computes the same ID as the install (this is the fix)
+        let lib_path = library.skill_path(&metadata.name);
+        let scanned_id = SkillLibrary::compute_skill_id(&metadata.name, &lib_path);
+        assert_eq!(skill.id, scanned_id, "IDs must match for scan upsert to work");
+
+        // Upsert the scanned skill (simulating what commands.rs does)
+        let scanned_skill = Skill {
+            id: scanned_id.clone(),
+            name: metadata.name.clone(),
+            path_hash: SkillLibrary::compute_path_hash(&lib_path),
+            library_path: lib_path.to_string_lossy().to_string(),
+            original_source_path: Some(lib_path.to_string_lossy().to_string()),
+            original_git_url: None,
+            original_git_subpath: None,
+            group: "library".to_string(),
+            description: metadata.description.clone(),
+            frontmatter: metadata.frontmatter.clone(),
+            created_at: skill.created_at.clone(),
+            mtime_ms: 0,
+            source_type: SkillSourceType::LocalFolder,
+            is_deleted: false,
+            content_hash: None,
+        };
+        repo.upsert_with_scan(&scanned_skill, scan_ts).unwrap();
+        repo.mark_missing_as_deleted(scan_ts).unwrap();
+
+        // 3. Verify: skill must still be installed
+        let installed_after_scan = repo.get_installed().unwrap();
+        assert_eq!(
+            installed_after_scan.len(), 1,
+            "Skill must remain installed after scan (got {} installed skills)",
+            installed_after_scan.len()
+        );
+        assert_eq!(installed_after_scan[0].id, skill.id);
     }
 }

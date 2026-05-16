@@ -116,8 +116,9 @@ impl Scanner {
             .unwrap_or("")
             .to_string();
 
-        let path_hash = SkillLibrary::compute_path_hash(dir);
-        let id = SkillLibrary::compute_skill_id(&name, dir);
+        let library_path = library.skill_path(&name);
+        let path_hash = SkillLibrary::compute_path_hash(&library_path);
+        let id = SkillLibrary::compute_skill_id(&name, &library_path);
 
         let mtime = fs::metadata(dir).ok().and_then(|m| m.modified().ok());
         let mtime_ms = mtime.map(|t| t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)).unwrap_or(0);
