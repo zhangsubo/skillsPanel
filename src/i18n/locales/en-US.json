@@ -1,6 +1,5 @@
 {
   "app.title": "Skills Panel",
-  "app.version": "v0.2.0",
   "nav.dashboard": "Dashboard",
   "nav.library": "My Skills",
   "nav.scanner": "Install Skills",

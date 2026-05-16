@@ -1,6 +1,5 @@
 {
   "app.title": "技能面板",
-  "app.version": "v0.2.0",
   "nav.dashboard": "仪表盘",
   "nav.library": "我的 Skills",
   "nav.scanner": "安装 Skills",

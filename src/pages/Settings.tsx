@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+import { getVersion } from '@tauri-apps/api/app'
 import {
   getConfig,
   updateConfig,
@@ -55,6 +56,7 @@ export default function Settings() {
   const [newToolPath, setNewToolPath] = useState('')
 
   const [editedRepoPath, setEditedRepoPath] = useState<string | null>(null)
+  const [version, setVersion] = useState('')
 
   const loadConfig = useCallback(async () => {
     setLoading(true)
@@ -73,6 +75,10 @@ export default function Settings() {
   useEffect(() => {
     loadConfig()
   }, [loadConfig])
+
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => setVersion(''))
+  }, [])
 
   const tools: ToolJson[] = config?.tools ?? []
   const repoPath = editedRepoPath ?? config?.library_path ?? ''
@@ -346,7 +352,7 @@ export default function Settings() {
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           <img src={appIconUrl} alt="Skills Panel" className="h-5 w-5" />
           <span className="font-medium">{t('settings.footer')}</span>
-          <span className="text-xs">0.2.0</span>
+          <span className="text-xs">{version}</span>
         </div>
         <p className="mt-1 text-xs text-muted-foreground/60">@zhangsubo.cn</p>
       </div>
