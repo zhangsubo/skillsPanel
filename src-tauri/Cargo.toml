@@ -25,7 +25,7 @@ chrono = { version = "0.4", features = ["serde"] }
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
-git2 = { version = "0.19", default-features = false, features = ["securetransport"] }
+git2 = { version = "0.19", features = ["vendored-openssl"] }
 fs2 = "0.4"
 aes-gcm = "0.10"
 rand = "0.8"
