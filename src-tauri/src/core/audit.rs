@@ -1,5 +1,5 @@
-use crate::core::error::AppError;
 use crate::core::config::AppConfig;
+use crate::core::error::AppError;
 use crate::core::models::AuditEntry;
 use std::fs;
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ pub struct AuditLog {
 }
 
 impl AuditLog {
-    pub fn new(config: &AppConfig) -> Result<Self, AppError> {
+    pub fn new(_config: &AppConfig) -> Result<Self, AppError> {
         let config_dir = dirs::home_dir()
             .ok_or_else(|| AppError::Config("Cannot find home directory".into()))?
             .join(".skills-panel");
@@ -24,7 +24,14 @@ impl AuditLog {
         Ok(Self { entries, log_path })
     }
 
-    pub fn log(&mut self, action: &str, target: &str, details: Option<String>, success: bool, error: Option<String>) {
+    pub fn log(
+        &mut self,
+        action: &str,
+        target: &str,
+        details: Option<String>,
+        success: bool,
+        error: Option<String>,
+    ) {
         let entry = AuditEntry {
             timestamp: chrono::Utc::now().to_rfc3339(),
             action: action.to_string(),
@@ -37,7 +44,15 @@ impl AuditLog {
         self.save_to_json();
     }
 
-    pub fn log_to_db(&self, db: &crate::core::database::Database, action: &str, target: &str, details: Option<String>, success: bool, error: Option<String>) -> Result<(), AppError> {
+    pub fn log_to_db(
+        &self,
+        db: &crate::core::database::Database,
+        action: &str,
+        target: &str,
+        details: Option<String>,
+        success: bool,
+        error: Option<String>,
+    ) -> Result<(), AppError> {
         let repo = crate::core::database::AuditRepository::new(db);
         repo.log(action, target, details, success, error)
     }
@@ -55,7 +70,13 @@ impl AuditLog {
     pub fn sync_to_database(&self, db: &crate::core::database::Database) -> Result<(), AppError> {
         let repo = crate::core::database::AuditRepository::new(db);
         for entry in &self.entries {
-            repo.log(&entry.action, &entry.target, entry.details.clone(), entry.success, entry.error.clone())?;
+            repo.log(
+                &entry.action,
+                &entry.target,
+                entry.details.clone(),
+                entry.success,
+                entry.error.clone(),
+            )?;
         }
         Ok(())
     }

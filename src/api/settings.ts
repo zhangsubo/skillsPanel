@@ -31,6 +31,7 @@ export interface AppConfigJson {
     skills: Record<string, unknown>;
   };
   deleted_skills: string[];
+  debug_logging: boolean;
 }
 
 export async function getConfig(): Promise<AppConfigJson> {

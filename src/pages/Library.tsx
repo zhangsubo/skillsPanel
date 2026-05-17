@@ -34,6 +34,9 @@ const createFallbackSkill = (name: string): Skill => ({
   mtime_ms: 0,
   source_type: 'local-folder',
   is_deleted: false,
+  source_revision: null,
+  source_remote_revision: null,
+  source_update_status: 'up-to-date',
 })
 
 export default function Library() {

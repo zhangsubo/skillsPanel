@@ -7,6 +7,16 @@ export async function previewLocalInstall(
   return invokeCommand<InstallCandidate[]>('preview_local_install', { path });
 }
 
+export async function previewGitInstall(
+  gitUrl: string,
+  subpath?: string,
+): Promise<InstallCandidate[]> {
+  return invokeCommand<InstallCandidate[]>('preview_git_install', {
+    gitUrl,
+    ...(subpath !== undefined && { subpath }),
+  });
+}
+
 export async function installLocalSkill(
   sourcePath: string,
   name?: string,
@@ -27,5 +37,13 @@ export async function installGitSkill(
     ...(subpath !== undefined && { subpath }),
     ...(name !== undefined && { name }),
   });
+}
+
+export async function checkSkillUpdate(skillId: string): Promise<boolean> {
+  return invokeCommand<boolean>('check_skill_update', { skillId });
+}
+
+export async function updateSkill(skillId: string): Promise<string> {
+  return invokeCommand<string>('update_skill', { skillId });
 }
 

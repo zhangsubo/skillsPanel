@@ -1,7 +1,7 @@
+use crate::core::config::AppConfig;
 use crate::core::database::Database;
 use crate::core::error::AppError;
 use crate::core::models::AuditEntry;
-use crate::core::config::AppConfig;
 use std::fs;
 
 pub struct Migration;
@@ -18,7 +18,11 @@ impl Migration {
         Ok(result)
     }
 
-    fn migrate_config(db: &Database, config: &AppConfig, result: &mut MigrationResult) -> Result<(), AppError> {
+    fn migrate_config(
+        db: &Database,
+        config: &AppConfig,
+        result: &mut MigrationResult,
+    ) -> Result<(), AppError> {
         let repo = crate::core::database::ConfigRepository::new(db);
 
         if repo.get("library_path").is_ok() && repo.get("library_path").unwrap().is_some() {
@@ -77,7 +81,11 @@ impl Migration {
         Ok(())
     }
 
-    fn migrate_tools(db: &Database, config: &AppConfig, result: &mut MigrationResult) -> Result<(), AppError> {
+    fn migrate_tools(
+        db: &Database,
+        config: &AppConfig,
+        result: &mut MigrationResult,
+    ) -> Result<(), AppError> {
         let repo = crate::core::database::ToolsRepository::new(db);
         let existing = repo.get_all()?;
         if !existing.is_empty() {
@@ -92,7 +100,11 @@ impl Migration {
         Ok(())
     }
 
-    fn migrate_library_skills(db: &Database, config: &AppConfig, result: &mut MigrationResult) -> Result<(), AppError> {
+    fn migrate_library_skills(
+        db: &Database,
+        config: &AppConfig,
+        result: &mut MigrationResult,
+    ) -> Result<(), AppError> {
         let repo = crate::core::database::SkillsRepository::new(db);
         let existing = repo.get_installed()?;
         if !existing.is_empty() {
@@ -108,15 +120,20 @@ impl Migration {
         for entry in fs::read_dir(library_path)
             .map_err(|e| AppError::Config(format!("Failed to read library dir: {}", e)))?
         {
-            let entry = entry.map_err(|e| AppError::Config(format!("Failed to read dir entry: {}", e)))?;
-            if !entry.file_type().map_err(|e| AppError::Config(e.to_string()))?.is_dir() {
+            let entry =
+                entry.map_err(|e| AppError::Config(format!("Failed to read dir entry: {}", e)))?;
+            if !entry
+                .file_type()
+                .map_err(|e| AppError::Config(e.to_string()))?
+                .is_dir()
+            {
                 continue;
             }
             let skill_dir = entry.path();
-            let skill_md = skill_dir.join("SKILL.md");
-            if !skill_md.exists() {
-                continue;
-            }
+            let skill_md = match crate::core::fs_utils::find_skill_marker(&skill_dir) {
+                Some(p) => p,
+                None => continue,
+            };
 
             let name = entry.file_name().to_string_lossy().into_owned();
             let skill_id = crate::core::library::SkillLibrary::compute_skill_id(&name, &skill_dir);
@@ -124,7 +141,8 @@ impl Migration {
             let description = fs::read_to_string(&skill_md)
                 .ok()
                 .and_then(|content| {
-                    content.lines()
+                    content
+                        .lines()
                         .find(|l| l.starts_with("description:"))
                         .map(|l| l.trim_start_matches("description:").trim().to_string())
                 })
@@ -151,6 +169,9 @@ impl Migration {
                 source_type: crate::core::models::SkillSourceType::LocalFolder,
                 is_deleted: false,
                 content_hash: None,
+                source_revision: None,
+                source_remote_revision: None,
+                source_update_status: Default::default(),
             };
 
             repo.upsert(&skill)?;

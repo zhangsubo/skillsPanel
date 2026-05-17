@@ -1,7 +1,7 @@
-use crate::core::models::*;
 use crate::core::config::AppConfig;
-use crate::core::linker::Linker;
 use crate::core::library::SkillLibrary;
+use crate::core::linker::Linker;
+use crate::core::models::*;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -13,7 +13,8 @@ impl ConflictDetector {
         for skill in skills {
             *name_counts.entry(skill.skill.name.clone()).or_insert(0) += 1;
         }
-        name_counts.into_iter()
+        name_counts
+            .into_iter()
             .filter(|(_, count)| *count > 1)
             .map(|(name, _)| name)
             .collect()
@@ -32,7 +33,11 @@ impl ConflictDetector {
         }
     }
 
-    pub fn check_link_integrity(skill: &Skill, tools: &[Tool], library: &SkillLibrary) -> HashMap<String, SkillToolStatus> {
+    pub fn check_link_integrity(
+        skill: &Skill,
+        tools: &[Tool],
+        library: &SkillLibrary,
+    ) -> HashMap<String, SkillToolStatus> {
         let skill_path = library.skill_path(&skill.name);
         let mut statuses = HashMap::new();
 
@@ -56,14 +61,15 @@ impl ConflictDetector {
         let mut conflicts: HashMap<String, Vec<String>> = HashMap::new();
 
         for skill in skills {
-            let skill_path = library.skill_path(&skill.skill.name);
+            let _skill_path = library.skill_path(&skill.skill.name);
             for tool in &config.tools {
                 if !tool.enabled {
                     continue;
                 }
                 let tool_dir = Path::new(&tool.path);
                 if let Some(msg) = Self::check_directory_conflict(tool_dir, &skill.skill.name) {
-                    conflicts.entry(skill.skill.name.clone())
+                    conflicts
+                        .entry(skill.skill.name.clone())
                         .or_default()
                         .push(format!("{}: {}", tool.name, msg));
                 }

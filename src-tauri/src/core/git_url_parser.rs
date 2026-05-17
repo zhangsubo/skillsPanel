@@ -7,6 +7,9 @@ pub struct ParsedGitSource {
     pub clone_url: String,
     pub branch: Option<String>,
     pub subpath: Option<String>,
+    /// Full path after `tree/` in tree URLs (e.g., `feature/x/skills`).
+    /// Used for post-clone resolution when branch name contains slashes.
+    pub tree_path: Option<String>,
 }
 
 pub struct GitUrlParser;
@@ -28,7 +31,9 @@ impl GitUrlParser {
         }
 
         if trimmed.contains("..") {
-            return Err(AppError::Git("Invalid Git URL: path traversal detected".into()));
+            return Err(AppError::Git(
+                "Invalid Git URL: path traversal detected".into(),
+            ));
         }
 
         if trimmed.is_empty() {
@@ -48,6 +53,7 @@ impl GitUrlParser {
                 clone_url: tree_info.0,
                 branch: Some(tree_info.1),
                 subpath: tree_info.2,
+                tree_path: tree_info.3,
             };
         }
 
@@ -58,6 +64,7 @@ impl GitUrlParser {
             clone_url: validated,
             branch: None,
             subpath: None,
+            tree_path: None,
         }
     }
 
@@ -68,10 +75,14 @@ impl GitUrlParser {
             .to_string()
     }
 
-    fn normalize_git_url(url: &str) -> String {
+    pub fn normalize_git_url(url: &str) -> String {
         let trimmed = url.trim();
 
-        if trimmed.starts_with("https://") || trimmed.starts_with("http://") || trimmed.starts_with("git@") || trimmed.starts_with("ssh://") {
+        if trimmed.starts_with("https://")
+            || trimmed.starts_with("http://")
+            || trimmed.starts_with("git@")
+            || trimmed.starts_with("ssh://")
+        {
             return Self::extract_clean_repo_url(trimmed).unwrap_or_else(|| trimmed.to_string());
         }
 
@@ -84,8 +95,12 @@ impl GitUrlParser {
             return format!("https://github.com/{}", trimmed);
         }
 
-        if trimmed.contains("github.com") || trimmed.contains("gitlab.com") || trimmed.contains("bitbucket.org") {
-            return Self::extract_clean_repo_url(trimmed).unwrap_or_else(|| format!("https://{}", trimmed));
+        if trimmed.contains("github.com")
+            || trimmed.contains("gitlab.com")
+            || trimmed.contains("bitbucket.org")
+        {
+            return Self::extract_clean_repo_url(trimmed)
+                .unwrap_or_else(|| format!("https://{}", trimmed));
         }
 
         format!("https://{}", trimmed)
@@ -101,9 +116,13 @@ impl GitUrlParser {
                     let owner = parts[0];
                     let repo = parts[1].trim_end_matches(".git");
                     if !owner.is_empty() && !repo.is_empty() {
-                        let protocol = if url.starts_with("https://") { "https://" }
-                            else if url.starts_with("http://") { "http://" }
-                            else { "https://" };
+                        let protocol = if url.starts_with("https://") {
+                            "https://"
+                        } else if url.starts_with("http://") {
+                            "http://"
+                        } else {
+                            "https://"
+                        };
                         return Some(format!("{}{}{}/{}", protocol, pattern, owner, repo));
                     }
                 }
@@ -112,7 +131,7 @@ impl GitUrlParser {
         None
     }
 
-    fn parse_tree_url(url: &str) -> Option<(String, String, Option<String>)> {
+    fn parse_tree_url(url: &str) -> Option<(String, String, Option<String>, Option<String>)> {
         let github_prefix = "https://github.com/";
         if !url.starts_with(github_prefix) {
             return None;
@@ -130,13 +149,63 @@ impl GitUrlParser {
         if segments[2] != "tree" {
             return None;
         }
-        let branch = segments[3].to_string();
-        let subpath = if segments.len() > 4 {
-            Some(segments[4..].join("/"))
+        let tree_path = segments[3..].join("/");
+        Some((
+            format!("https://github.com/{}/{}", owner, repo),
+            tree_path.clone(),
+            None,
+            Some(tree_path),
+        ))
+    }
+
+    /// Resolve a tree path (e.g., `feature/x/skills`) into a branch and optional subpath.
+    ///
+    /// Tries branch candidates from longest to shortest prefix by checking if
+    /// the branch exists in the repository (local or remote).
+    /// Falls back to first segment as branch (current behavior).
+    pub fn resolve_tree_path(
+        repo: &git2::Repository,
+        tree_path: &str,
+    ) -> Option<(String, Option<String>)> {
+        let segments: Vec<&str> = tree_path.split('/').collect();
+        if segments.is_empty() {
+            return None;
+        }
+
+        // Try candidates from longest to shortest prefix
+        for i in (1..=segments.len()).rev() {
+            let candidate = segments[..i].join("/");
+
+            // Check remote branches first (refs/remotes/origin/{candidate})
+            let remote_ref = format!("refs/remotes/origin/{}", candidate);
+            if repo.find_reference(&remote_ref).is_ok() {
+                let subpath = if i < segments.len() {
+                    Some(segments[i..].join("/"))
+                } else {
+                    None
+                };
+                return Some((candidate, subpath));
+            }
+
+            // Check local branches (refs/heads/{candidate})
+            let local_ref = format!("refs/heads/{}", candidate);
+            if repo.find_reference(&local_ref).is_ok() {
+                let subpath = if i < segments.len() {
+                    Some(segments[i..].join("/"))
+                } else {
+                    None
+                };
+                return Some((candidate, subpath));
+            }
+        }
+
+        // Fallback: first segment as branch
+        let subpath = if segments.len() > 1 {
+            Some(segments[1..].join("/"))
         } else {
             None
         };
-        Some((format!("https://github.com/{}/{}", owner, repo), branch, subpath))
+        Some((segments[0].to_string(), subpath))
     }
 
     pub fn extract_github_repo_url(url: &str) -> Option<String> {
@@ -181,10 +250,12 @@ mod tests {
 
     #[test]
     fn test_parse_tree_url() {
-        let parsed = GitUrlParser::parse_git_source("https://github.com/user/repo/tree/main/tools/skill");
+        let parsed =
+            GitUrlParser::parse_git_source("https://github.com/user/repo/tree/main/tools/skill");
         assert_eq!(parsed.clone_url, "https://github.com/user/repo");
-        assert_eq!(parsed.branch, Some("main".to_string()));
-        assert_eq!(parsed.subpath, Some("tools/skill".to_string()));
+        assert_eq!(parsed.branch, Some("main/tools/skill".to_string()));
+        assert_eq!(parsed.tree_path, Some("main/tools/skill".to_string()));
+        assert!(parsed.subpath.is_none());
     }
 
     #[test]
@@ -202,9 +273,12 @@ mod tests {
 
     #[test]
     fn test_tree_url_branch_with_slash() {
-        let parsed = GitUrlParser::parse_git_source("https://github.com/user/repo/tree/feature/x/skills/foo");
+        let parsed = GitUrlParser::parse_git_source(
+            "https://github.com/user/repo/tree/feature/x/skills/foo",
+        );
         assert_eq!(parsed.clone_url, "https://github.com/user/repo");
-        assert_eq!(parsed.branch, Some("feature".to_string()));
-        assert_eq!(parsed.subpath, Some("x/skills/foo".to_string()));
+        assert_eq!(parsed.branch, Some("feature/x/skills/foo".to_string()));
+        assert_eq!(parsed.tree_path, Some("feature/x/skills/foo".to_string()));
+        assert!(parsed.subpath.is_none());
     }
 }

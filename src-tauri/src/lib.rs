@@ -1,16 +1,16 @@
-pub mod core;
 pub mod commands;
+pub mod core;
 
 use std::sync::Mutex;
 use tauri::Emitter;
 use tauri::Manager;
 
-use crate::core::config::AppConfig;
-use crate::core::library::SkillLibrary;
 use crate::core::audit::AuditLog;
-use crate::core::models::LogEntry;
+use crate::core::config::AppConfig;
 use crate::core::database::Database;
 use crate::core::install_cancel::InstallCancelRegistry;
+use crate::core::library::SkillLibrary;
+use crate::core::models::LogEntry;
 use std::sync::Arc;
 
 pub struct AppState {
@@ -28,7 +28,9 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let default_config = AppConfig::default_config();
-            let database_path = default_config.library_path.parent()
+            let database_path = default_config
+                .library_path
+                .parent()
                 .unwrap_or(&default_config.library_path)
                 .join("skills_panel.db");
 
@@ -38,22 +40,29 @@ pub fn run() {
 
             let database = Database::new(&database_path)?;
 
-            let mut config = load_config_from_db(&database)
-                .unwrap_or_else(|_| {
-                    let json_config = AppConfig::load_or_create().unwrap_or(default_config);
-                    migrate_json_config_to_db(&database, &json_config).ok();
-                    json_config
-                });
+            let mut config = load_config_from_db(&database).unwrap_or_else(|_| {
+                let json_config = AppConfig::load_or_create().unwrap_or(default_config);
+                migrate_json_config_to_db(&database, &json_config).ok();
+                json_config
+            });
 
             let disabled = config.check_tool_availability();
             if !disabled.is_empty() {
-                println!("[Tool Check] Auto-disabled missing tools: {}", disabled.join(", "));
+                println!(
+                    "[Tool Check] Auto-disabled missing tools: {}",
+                    disabled.join(", ")
+                );
             }
             let library = SkillLibrary::new(&config)?;
             let audit_log = AuditLog::new(&config)?;
 
-            let migration_result = crate::core::migration::Migration::run_on_startup(&database, &config)?;
-            if migration_result.config_migrated || migration_result.audit_migrated > 0 || migration_result.tools_migrated > 0 || migration_result.skills_migrated > 0 {
+            let migration_result =
+                crate::core::migration::Migration::run_on_startup(&database, &config)?;
+            if migration_result.config_migrated
+                || migration_result.audit_migrated > 0
+                || migration_result.tools_migrated > 0
+                || migration_result.skills_migrated > 0
+            {
                 println!("[Migration] {}", migration_result);
             }
 
@@ -98,6 +107,7 @@ pub fn run() {
             commands::scan_skills,
             commands::get_skill_content,
             commands::preview_local_install,
+            commands::preview_git_install,
             commands::install_local_skill,
             commands::install_git_skill,
             commands::link_skill,
@@ -136,6 +146,8 @@ pub fn run() {
             commands::unlink_tool_skill_in_db,
             commands::get_linked_tool_ids,
             commands::cancel_install,
+            commands::check_skill_update,
+            commands::update_skill,
             commands::create_project,
             commands::list_projects,
             commands::delete_project,
@@ -156,7 +168,9 @@ fn load_config_from_db(database: &Database) -> Result<AppConfig, crate::core::er
         || db_repo.get("library_path")?.is_some();
 
     if !has_data {
-        return Err(crate::core::error::AppError::Config("DB config empty".into()));
+        return Err(crate::core::error::AppError::Config(
+            "DB config empty".into(),
+        ));
     }
 
     if let Some(path_str) = db_repo.get("library_path")? {
@@ -168,7 +182,9 @@ fn load_config_from_db(database: &Database) -> Result<AppConfig, crate::core::er
         }
     }
     if let Some(sources_json) = db_repo.get("sources")? {
-        if let Ok(sources) = serde_json::from_str::<Vec<crate::core::models::SourceConfig>>(&sources_json) {
+        if let Ok(sources) =
+            serde_json::from_str::<Vec<crate::core::models::SourceConfig>>(&sources_json)
+        {
             config.sources = sources;
         }
     }
@@ -183,7 +199,9 @@ fn load_config_from_db(database: &Database) -> Result<AppConfig, crate::core::er
         }
     }
     if let Some(install_json) = db_repo.get("install")? {
-        if let Ok(install) = serde_json::from_str::<crate::core::models::InstallConfig>(&install_json) {
+        if let Ok(install) =
+            serde_json::from_str::<crate::core::models::InstallConfig>(&install_json)
+        {
             config.install = install;
         }
     }
@@ -207,20 +225,27 @@ fn migrate_json_config_to_db(
 ) -> Result<(), crate::core::error::AppError> {
     let db_repo = crate::core::database::ConfigRepository::new(database);
 
-    let tools_json = serde_json::to_string(&config.tools)
-        .map_err(|e| crate::core::error::AppError::Config(format!("Failed to serialize tools: {}", e)))?;
-    let sources_json = serde_json::to_string(&config.sources)
-        .map_err(|e| crate::core::error::AppError::Config(format!("Failed to serialize sources: {}", e)))?;
-    let rules_json = serde_json::to_string(&config.rules)
-        .map_err(|e| crate::core::error::AppError::Config(format!("Failed to serialize rules: {}", e)))?;
-    let sync_json = serde_json::to_string(&config.sync)
-        .map_err(|e| crate::core::error::AppError::Config(format!("Failed to serialize sync: {}", e)))?;
-    let install_json = serde_json::to_string(&config.install)
-        .map_err(|e| crate::core::error::AppError::Config(format!("Failed to serialize install: {}", e)))?;
-    let exclude_json = serde_json::to_string(&config.exclude_paths)
-        .map_err(|e| crate::core::error::AppError::Config(format!("Failed to serialize exclude_paths: {}", e)))?;
-    let deleted_json = serde_json::to_string(&config.deleted_skills)
-        .map_err(|e| crate::core::error::AppError::Config(format!("Failed to serialize deleted_skills: {}", e)))?;
+    let tools_json = serde_json::to_string(&config.tools).map_err(|e| {
+        crate::core::error::AppError::Config(format!("Failed to serialize tools: {}", e))
+    })?;
+    let sources_json = serde_json::to_string(&config.sources).map_err(|e| {
+        crate::core::error::AppError::Config(format!("Failed to serialize sources: {}", e))
+    })?;
+    let rules_json = serde_json::to_string(&config.rules).map_err(|e| {
+        crate::core::error::AppError::Config(format!("Failed to serialize rules: {}", e))
+    })?;
+    let sync_json = serde_json::to_string(&config.sync).map_err(|e| {
+        crate::core::error::AppError::Config(format!("Failed to serialize sync: {}", e))
+    })?;
+    let install_json = serde_json::to_string(&config.install).map_err(|e| {
+        crate::core::error::AppError::Config(format!("Failed to serialize install: {}", e))
+    })?;
+    let exclude_json = serde_json::to_string(&config.exclude_paths).map_err(|e| {
+        crate::core::error::AppError::Config(format!("Failed to serialize exclude_paths: {}", e))
+    })?;
+    let deleted_json = serde_json::to_string(&config.deleted_skills).map_err(|e| {
+        crate::core::error::AppError::Config(format!("Failed to serialize deleted_skills: {}", e))
+    })?;
 
     db_repo.set("library_path", &config.library_path.to_string_lossy())?;
     db_repo.set("tools", &tools_json)?;

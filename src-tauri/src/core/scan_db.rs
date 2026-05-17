@@ -1,8 +1,8 @@
 use crate::core::error::AppError;
 use crate::core::models::{Skill, SkillSourceType, SkillWithStatus};
-use rusqlite::{Connection, params};
-use std::path::PathBuf;
+use rusqlite::{params, Connection};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 pub struct ScanDatabase {
     conn: Connection,
@@ -10,7 +10,8 @@ pub struct ScanDatabase {
 
 impl ScanDatabase {
     pub fn new(db_path: &PathBuf) -> Result<Self, AppError> {
-        let conn = Connection::open(db_path).map_err(|e| AppError::Config(format!("Failed to open DB: {}", e)))?;
+        let conn = Connection::open(db_path)
+            .map_err(|e| AppError::Config(format!("Failed to open DB: {}", e)))?;
         Self::init_schema(&conn)?;
         Ok(Self { conn })
     }
@@ -36,20 +37,24 @@ impl ScanDatabase {
                 first_seen_at TEXT NOT NULL
             )",
             [],
-        ).map_err(|e| AppError::Config(format!("Failed to create skills table: {}", e)))?;
+        )
+        .map_err(|e| AppError::Config(format!("Failed to create skills table: {}", e)))?;
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name)",
             [],
-        ).map_err(|e| AppError::Config(format!("Failed to create index: {}", e)))?;
+        )
+        .map_err(|e| AppError::Config(format!("Failed to create index: {}", e)))?;
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_skills_source ON skills(original_source_path)",
             [],
-        ).map_err(|e| AppError::Config(format!("Failed to create index: {}", e)))?;
+        )
+        .map_err(|e| AppError::Config(format!("Failed to create index: {}", e)))?;
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_skills_last_seen ON skills(last_seen_at)",
             [],
-        ).map_err(|e| AppError::Config(format!("Failed to create index: {}", e)))?;
+        )
+        .map_err(|e| AppError::Config(format!("Failed to create index: {}", e)))?;
 
         Ok(())
     }
@@ -64,8 +69,9 @@ impl ScanDatabase {
             SkillSourceType::LocalFolder => "local-folder",
         };
 
-        self.conn.execute(
-            "INSERT INTO skills (
+        self.conn
+            .execute(
+                "INSERT INTO skills (
                 id, name, path_hash, library_path, original_source_path,
                 original_git_url, original_git_subpath, group_name, description,
                 frontmatter, created_at, mtime_ms, source_type, is_deleted,
@@ -82,89 +88,124 @@ impl ScanDatabase {
                 mtime_ms = excluded.mtime_ms,
                 is_deleted = 0,
                 last_seen_at = excluded.last_seen_at",
-            params![
-                skill.id, skill.name, skill.path_hash, skill.library_path,
-                skill.original_source_path, skill.original_git_url, skill.original_git_subpath,
-                skill.group, skill.description, frontmatter_json, skill.created_at,
-                skill.mtime_ms, source_type_str,
-                skill.is_deleted as i32, scan_timestamp,
-            ],
-        ).map_err(|e| AppError::Config(format!("Failed to upsert skill: {}", e)))?;
+                params![
+                    skill.id,
+                    skill.name,
+                    skill.path_hash,
+                    skill.library_path,
+                    skill.original_source_path,
+                    skill.original_git_url,
+                    skill.original_git_subpath,
+                    skill.group,
+                    skill.description,
+                    frontmatter_json,
+                    skill.created_at,
+                    skill.mtime_ms,
+                    source_type_str,
+                    skill.is_deleted as i32,
+                    scan_timestamp,
+                ],
+            )
+            .map_err(|e| AppError::Config(format!("Failed to upsert skill: {}", e)))?;
 
         Ok(())
     }
 
     pub fn mark_missing_as_deleted(&self, scan_timestamp: &str) -> Result<Vec<String>, AppError> {
         // Hard delete: physically remove records that weren't seen in the latest scan
-        let mut stmt = self.conn.prepare(
-            "DELETE FROM skills WHERE last_seen_at < ?1
-             RETURNING id"
-        ).map_err(|e| AppError::Config(format!("Failed to prepare delete query: {}", e)))?;
+        let mut stmt = self
+            .conn
+            .prepare(
+                "DELETE FROM skills WHERE last_seen_at < ?1
+             RETURNING id",
+            )
+            .map_err(|e| AppError::Config(format!("Failed to prepare delete query: {}", e)))?;
 
-        let ids: Result<Vec<String>, _> = stmt.query_map([scan_timestamp], |row| {
-            row.get(0)
-        }).map_err(|e| AppError::Config(format!("Failed to query deleted skills: {}", e)))?
-        .collect();
+        let ids: Result<Vec<String>, _> = stmt
+            .query_map([scan_timestamp], |row| row.get(0))
+            .map_err(|e| AppError::Config(format!("Failed to query deleted skills: {}", e)))?
+            .collect();
 
         Ok(ids.map_err(|e| AppError::Config(format!("Failed to collect deleted skills: {}", e)))?)
     }
 
     pub fn get_new_skills(&self, scan_timestamp: &str) -> Result<Vec<Skill>, AppError> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, name, path_hash, library_path, original_source_path,
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, name, path_hash, library_path, original_source_path,
                     original_git_url, original_git_subpath, group_name, description,
                     frontmatter, created_at, mtime_ms, source_type, is_deleted
              FROM skills WHERE first_seen_at = ?1 AND is_deleted = 0
-             ORDER BY name"
-        ).map_err(|e| AppError::Config(format!("Failed to prepare new skills query: {}", e)))?;
+             ORDER BY name",
+            )
+            .map_err(|e| AppError::Config(format!("Failed to prepare new skills query: {}", e)))?;
 
         Self::query_skills(&mut stmt, [scan_timestamp])
     }
 
     pub fn get_updated_skills(&self, scan_timestamp: &str) -> Result<Vec<Skill>, AppError> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, name, path_hash, library_path, original_source_path,
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, name, path_hash, library_path, original_source_path,
                     original_git_url, original_git_subpath, group_name, description,
                     frontmatter, created_at, mtime_ms, source_type, is_deleted
              FROM skills
              WHERE last_seen_at = ?1
              AND first_seen_at != last_seen_at
              AND is_deleted = 0
-             ORDER BY name"
-        ).map_err(|e| AppError::Config(format!("Failed to prepare updated skills query: {}", e)))?;
+             ORDER BY name",
+            )
+            .map_err(|e| {
+                AppError::Config(format!("Failed to prepare updated skills query: {}", e))
+            })?;
 
         Self::query_skills(&mut stmt, [scan_timestamp])
     }
 
     pub fn get_deleted_skills(&self) -> Result<Vec<Skill>, AppError> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, name, path_hash, library_path, original_source_path,
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, name, path_hash, library_path, original_source_path,
                     original_git_url, original_git_subpath, group_name, description,
                     frontmatter, created_at, mtime_ms, source_type, is_deleted
-             FROM skills WHERE is_deleted = 1 ORDER BY last_seen_at DESC"
-        ).map_err(|e| AppError::Config(format!("Failed to prepare deleted skills query: {}", e)))?;
+             FROM skills WHERE is_deleted = 1 ORDER BY last_seen_at DESC",
+            )
+            .map_err(|e| {
+                AppError::Config(format!("Failed to prepare deleted skills query: {}", e))
+            })?;
 
         Self::query_skills(&mut stmt, [])
     }
 
     pub fn get_all_active(&self) -> Result<Vec<Skill>, AppError> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, name, path_hash, library_path, original_source_path,
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, name, path_hash, library_path, original_source_path,
                     original_git_url, original_git_subpath, group_name, description,
                     frontmatter, created_at, mtime_ms, source_type, is_deleted
-             FROM skills WHERE is_deleted = 0 ORDER BY name"
-        ).map_err(|e| AppError::Config(format!("Failed to prepare active skills query: {}", e)))?;
+             FROM skills WHERE is_deleted = 0 ORDER BY name",
+            )
+            .map_err(|e| {
+                AppError::Config(format!("Failed to prepare active skills query: {}", e))
+            })?;
 
         Self::query_skills(&mut stmt, [])
     }
 
     pub fn get_skill_by_id(&self, id: &str) -> Result<Option<Skill>, AppError> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, name, path_hash, library_path, original_source_path,
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, name, path_hash, library_path, original_source_path,
                     original_git_url, original_git_subpath, group_name, description,
                     frontmatter, created_at, mtime_ms, source_type, is_deleted
-             FROM skills WHERE id = ?1"
-        ).map_err(|e| AppError::Config(format!("Failed to prepare skill query: {}", e)))?;
+             FROM skills WHERE id = ?1",
+            )
+            .map_err(|e| AppError::Config(format!("Failed to prepare skill query: {}", e)))?;
 
         let mut skills = Self::query_skills(&mut stmt, [id])?;
         Ok(skills.pop())
@@ -174,38 +215,45 @@ impl ScanDatabase {
         stmt: &mut rusqlite::Statement,
         params: P,
     ) -> Result<Vec<Skill>, AppError> {
-        let rows = stmt.query_map(params, |row| {
-            let source_type_str: String = row.get(12)?;
-            let frontmatter_str: String = row.get(9)?;
-            let frontmatter: HashMap<String, serde_json::Value> =
-                serde_json::from_str(&frontmatter_str).unwrap_or_default();
+        let rows = stmt
+            .query_map(params, |row| {
+                let source_type_str: String = row.get(12)?;
+                let frontmatter_str: String = row.get(9)?;
+                let frontmatter: HashMap<String, serde_json::Value> =
+                    serde_json::from_str(&frontmatter_str).unwrap_or_default();
 
-            Ok(Skill {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                path_hash: row.get(2)?,
-                library_path: row.get(3)?,
-                original_source_path: row.get(4)?,
-                original_git_url: row.get(5)?,
-                original_git_subpath: row.get(6)?,
-                group: row.get(7)?,
-                description: row.get(8)?,
-                frontmatter,
-                created_at: row.get(10)?,
-                mtime_ms: row.get(11)?,
-                source_type: match source_type_str.as_str() {
-                    "git" => SkillSourceType::Git,
-                    "local-zip" => SkillSourceType::LocalZip,
-                    _ => SkillSourceType::LocalFolder,
-                },
-                is_deleted: row.get::<_, i32>(13)? != 0,
-                content_hash: None,
+                Ok(Skill {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    path_hash: row.get(2)?,
+                    library_path: row.get(3)?,
+                    original_source_path: row.get(4)?,
+                    original_git_url: row.get(5)?,
+                    original_git_subpath: row.get(6)?,
+                    group: row.get(7)?,
+                    description: row.get(8)?,
+                    frontmatter,
+                    created_at: row.get(10)?,
+                    mtime_ms: row.get(11)?,
+                    source_type: match source_type_str.as_str() {
+                        "git" => SkillSourceType::Git,
+                        "local-zip" => SkillSourceType::LocalZip,
+                        _ => SkillSourceType::LocalFolder,
+                    },
+                    is_deleted: row.get::<_, i32>(13)? != 0,
+                    content_hash: None,
+                    source_revision: None,
+                    source_remote_revision: None,
+                    source_update_status: Default::default(),
+                })
             })
-        }).map_err(|e| AppError::Config(format!("Failed to query skills: {}", e)))?;
+            .map_err(|e| AppError::Config(format!("Failed to query skills: {}", e)))?;
 
         let mut skills = Vec::new();
         for row in rows {
-            skills.push(row.map_err(|e| AppError::Config(format!("Failed to parse skill row: {}", e)))?);
+            skills.push(
+                row.map_err(|e| AppError::Config(format!("Failed to parse skill row: {}", e)))?,
+            );
         }
         Ok(skills)
     }
@@ -242,6 +290,9 @@ mod tests {
             source_type: SkillSourceType::LocalFolder,
             is_deleted: false,
             content_hash: None,
+            source_revision: None,
+            source_remote_revision: None,
+            source_update_status: Default::default(),
         }
     }
 
@@ -249,11 +300,14 @@ mod tests {
     fn test_init_schema_creates_tables() {
         let temp = NamedTempFile::new().unwrap();
         let db = ScanDatabase::new(&temp.path().to_path_buf()).unwrap();
-        let count: i64 = db.conn.query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='skills'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = db
+            .conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='skills'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1);
     }
 

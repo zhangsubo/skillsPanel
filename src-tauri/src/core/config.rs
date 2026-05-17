@@ -16,11 +16,14 @@ pub struct AppConfig {
     pub exclude_paths: Vec<String>,
     pub rules: RulesConfig,
     pub deleted_skills: Vec<String>,
+    #[serde(default)]
+    pub debug_logging: bool,
 }
 
 impl AppConfig {
     pub fn config_path() -> Result<PathBuf, AppError> {
-        let home = home_dir().ok_or_else(|| AppError::Config("Cannot find home directory".into()))?;
+        let home =
+            home_dir().ok_or_else(|| AppError::Config("Cannot find home directory".into()))?;
         Ok(home.join(".skills-panel").join("skills-panel.config.json"))
     }
 
@@ -49,25 +52,32 @@ impl AppConfig {
     }
 
     fn from_json_value(raw: serde_json::Value) -> Result<Self, AppError> {
-        let library_path = raw.get("library")
+        let library_path = raw
+            .get("library")
             .and_then(|l| l.get("path"))
             .and_then(|p| p.as_str())
             .map(|p| fs_utils::expand_tilde(p))
             .unwrap_or_else(Self::default_library_path);
 
-        let tools: Vec<Tool> = raw.get("tools")
+        let tools: Vec<Tool> = raw
+            .get("tools")
             .map(|t| Self::parse_tools(t))
             .unwrap_or_default();
 
-        let sources: Vec<SourceConfig> = raw.get("sources")
+        let sources: Vec<SourceConfig> = raw
+            .get("sources")
             .map(|s| serde_json::from_value(s.clone()).unwrap_or_default())
             .unwrap_or_default();
 
-        let sync: SyncConfig = raw.get("sync")
+        let sync: SyncConfig = raw
+            .get("sync")
             .map(|s| serde_json::from_value(s.clone()).unwrap_or_default())
-            .unwrap_or(SyncConfig { mode: SyncMode::Symlink });
+            .unwrap_or(SyncConfig {
+                mode: SyncMode::Symlink,
+            });
 
-        let install: InstallConfig = raw.get("install")
+        let install: InstallConfig = raw
+            .get("install")
             .map(|i| serde_json::from_value(i.clone()).unwrap_or_default())
             .unwrap_or(InstallConfig {
                 allow_zip: true,
@@ -75,17 +85,25 @@ impl AppConfig {
                 default_sync_targets: vec![],
             });
 
-        let exclude_paths: Vec<String> = raw.get("excludePaths")
+        let exclude_paths: Vec<String> = raw
+            .get("excludePaths")
             .map(|e| serde_json::from_value(e.clone()).unwrap_or_default())
-            .unwrap_or_else(|| vec![
-                "node_modules".into(), ".git".into(), "dist".into(), "coverage".into()
-            ]);
+            .unwrap_or_else(|| {
+                vec![
+                    "node_modules".into(),
+                    ".git".into(),
+                    "dist".into(),
+                    "coverage".into(),
+                ]
+            });
 
-        let rules: RulesConfig = raw.get("rules")
+        let rules: RulesConfig = raw
+            .get("rules")
             .map(|r| serde_json::from_value(r.clone()).unwrap_or_default())
             .unwrap_or_default();
 
-        let deleted_skills: Vec<String> = raw.get("deletedSkills")
+        let deleted_skills: Vec<String> = raw
+            .get("deletedSkills")
             .map(|d| serde_json::from_value(d.clone()).unwrap_or_default())
             .unwrap_or_default();
 
@@ -98,6 +116,7 @@ impl AppConfig {
             exclude_paths,
             rules,
             deleted_skills,
+            debug_logging: false,
         })
     }
 
@@ -106,11 +125,13 @@ impl AppConfig {
         if let Some(obj) = tools_json.as_object() {
             for (name, value) in obj {
                 if let Some(tool_obj) = value.as_object() {
-                    let path = tool_obj.get("path")
+                    let path = tool_obj
+                        .get("path")
                         .and_then(|p| p.as_str())
                         .map(|p| fs_utils::expand_tilde(p).to_string_lossy().into_owned())
                         .unwrap_or_default();
-                    let enabled = tool_obj.get("enabled")
+                    let enabled = tool_obj
+                        .get("enabled")
                         .and_then(|e| e.as_bool())
                         .unwrap_or(true);
                     result.push(Tool {
@@ -141,21 +162,28 @@ impl AppConfig {
     fn to_json_value(&self) -> serde_json::Value {
         let mut tools_map = serde_json::Map::new();
         for tool in &self.tools {
-            tools_map.insert(tool.id.clone(), serde_json::json!({
-                "path": fs_utils::contract_tilde(&tool.path),
-                "enabled": tool.enabled,
-            }));
+            tools_map.insert(
+                tool.id.clone(),
+                serde_json::json!({
+                    "path": fs_utils::contract_tilde(&tool.path),
+                    "enabled": tool.enabled,
+                }),
+            );
         }
 
-        let sources: Vec<serde_json::Value> = self.sources.iter().map(|s| {
-            serde_json::json!({
-                "path": fs_utils::contract_tilde(&s.path),
-                "group": s.group,
-                "default": s.default,
-                "enabled": s.enabled,
-                "recursive": s.recursive,
+        let sources: Vec<serde_json::Value> = self
+            .sources
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "path": fs_utils::contract_tilde(&s.path),
+                    "group": s.group,
+                    "default": s.default,
+                    "enabled": s.enabled,
+                    "recursive": s.recursive,
+                })
             })
-        }).collect();
+            .collect();
 
         serde_json::json!({
             "library": { "path": fs_utils::contract_tilde(self.library_path.to_string_lossy().as_ref()) },
@@ -182,13 +210,55 @@ impl AppConfig {
         let home_str = home.to_string_lossy();
 
         let default_tools = vec![
-            Tool { id: "cursor".into(), name: "Cursor".into(), path: format!("{}/.cursor/skills", home_str), enabled: true, is_custom: false },
-            Tool { id: "claude-code".into(), name: "Claude Code".into(), path: format!("{}/.claude/skills", home_str), enabled: true, is_custom: false },
-            Tool { id: "codex".into(), name: "Codex".into(), path: format!("{}/.codex/skills", home_str), enabled: true, is_custom: false },
-            Tool { id: "opencode".into(), name: "OpenCode".into(), path: format!("{}/.config/opencode/skill", home_str), enabled: true, is_custom: false },
-            Tool { id: "antigravity".into(), name: "Antigravity".into(), path: format!("{}/.antigravity/skills", home_str), enabled: true, is_custom: false },
-            Tool { id: "gemini-cli".into(), name: "Gemini CLI".into(), path: format!("{}/.gemini/skills", home_str), enabled: true, is_custom: false },
-            Tool { id: "trae-ide".into(), name: "TRAE IDE".into(), path: format!("{}/.trae/skills", home_str), enabled: true, is_custom: false },
+            Tool {
+                id: "cursor".into(),
+                name: "Cursor".into(),
+                path: format!("{}/.cursor/skills", home_str),
+                enabled: true,
+                is_custom: false,
+            },
+            Tool {
+                id: "claude-code".into(),
+                name: "Claude Code".into(),
+                path: format!("{}/.claude/skills", home_str),
+                enabled: true,
+                is_custom: false,
+            },
+            Tool {
+                id: "codex".into(),
+                name: "Codex".into(),
+                path: format!("{}/.codex/skills", home_str),
+                enabled: true,
+                is_custom: false,
+            },
+            Tool {
+                id: "opencode".into(),
+                name: "OpenCode".into(),
+                path: format!("{}/.config/opencode/skill", home_str),
+                enabled: true,
+                is_custom: false,
+            },
+            Tool {
+                id: "antigravity".into(),
+                name: "Antigravity".into(),
+                path: format!("{}/.antigravity/skills", home_str),
+                enabled: true,
+                is_custom: false,
+            },
+            Tool {
+                id: "gemini-cli".into(),
+                name: "Gemini CLI".into(),
+                path: format!("{}/.gemini/skills", home_str),
+                enabled: true,
+                is_custom: false,
+            },
+            Tool {
+                id: "trae-ide".into(),
+                name: "TRAE IDE".into(),
+                path: format!("{}/.trae/skills", home_str),
+                enabled: true,
+                is_custom: false,
+            },
         ];
 
         let default_sources = vec![
@@ -219,15 +289,23 @@ impl AppConfig {
             library_path: Self::default_library_path(),
             tools: default_tools,
             sources: default_sources,
-            sync: SyncConfig { mode: SyncMode::Symlink },
+            sync: SyncConfig {
+                mode: SyncMode::Symlink,
+            },
             install: InstallConfig {
                 allow_zip: true,
                 allow_git: true,
                 default_sync_targets: vec![],
             },
-            exclude_paths: vec!["node_modules".into(), ".git".into(), "dist".into(), "coverage".into()],
+            exclude_paths: vec![
+                "node_modules".into(),
+                ".git".into(),
+                "dist".into(),
+                "coverage".into(),
+            ],
             rules: RulesConfig::default(),
             deleted_skills: vec![],
+            debug_logging: false,
         }
     }
 
@@ -271,11 +349,23 @@ impl AppConfig {
         self.save()
     }
 
-    pub fn update_tool(&mut self, tool_id: String, enabled: Option<bool>, path: Option<String>) -> Result<(), AppError> {
-        let tool = self.tools.iter_mut().find(|t| t.id == tool_id)
+    pub fn update_tool(
+        &mut self,
+        tool_id: String,
+        enabled: Option<bool>,
+        path: Option<String>,
+    ) -> Result<(), AppError> {
+        let tool = self
+            .tools
+            .iter_mut()
+            .find(|t| t.id == tool_id)
             .ok_or_else(|| AppError::ToolNotFound(tool_id.clone()))?;
-        if let Some(e) = enabled { tool.enabled = e; }
-        if let Some(p) = path { tool.path = fs_utils::expand_tilde(&p).to_string_lossy().into_owned(); }
+        if let Some(e) = enabled {
+            tool.enabled = e;
+        }
+        if let Some(p) = path {
+            tool.path = fs_utils::expand_tilde(&p).to_string_lossy().into_owned();
+        }
         self.save()
     }
 
@@ -345,7 +435,9 @@ mod tests {
     fn test_add_tool() {
         let mut config = AppConfig::default_config();
         let initial_len = config.tools.len();
-        config.add_tool("Custom Tool".to_string(), "~/.custom/skills".to_string()).unwrap();
+        config
+            .add_tool("Custom Tool".to_string(), "~/.custom/skills".to_string())
+            .unwrap();
         assert_eq!(config.tools.len(), initial_len + 1);
         assert_eq!(config.tools.last().unwrap().id, "custom-tool");
     }
@@ -360,7 +452,13 @@ mod tests {
     #[test]
     fn test_update_tool() {
         let mut config = AppConfig::default_config();
-        config.update_tool("cursor".to_string(), Some(false), Some("/new/path".to_string())).unwrap();
+        config
+            .update_tool(
+                "cursor".to_string(),
+                Some(false),
+                Some("/new/path".to_string()),
+            )
+            .unwrap();
         let tool = config.tools.iter().find(|t| t.id == "cursor").unwrap();
         assert!(!tool.enabled);
         assert_eq!(tool.path, "/new/path");

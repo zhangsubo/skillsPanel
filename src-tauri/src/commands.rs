@@ -1,11 +1,11 @@
-use crate::AppState;
-use crate::core::error::AppError;
-use crate::core::models::*;
 use crate::core::config::AppConfig;
-use crate::core::library::SkillLibrary;
-use crate::core::skill_engine::SkillEngine;
 use crate::core::content_hash::ContentHash;
+use crate::core::error::AppError;
+use crate::core::library::SkillLibrary;
+use crate::core::models::*;
 use crate::core::repo_lock::RepoLock;
+use crate::core::skill_engine::SkillEngine;
+use crate::AppState;
 use std::sync::Mutex;
 use tauri::Emitter;
 use tauri::State;
@@ -13,7 +13,10 @@ use tauri::State;
 type SharedState = Mutex<AppState>;
 
 fn find_tool<'a>(config: &'a AppConfig, tool_id: &str) -> Result<&'a Tool, AppError> {
-    config.tools.iter().find(|t| t.id == tool_id)
+    config
+        .tools
+        .iter()
+        .find(|t| t.id == tool_id)
         .ok_or_else(|| AppError::ToolNotFound(tool_id.to_string()))
 }
 
@@ -29,8 +32,8 @@ pub fn update_config(state: State<'_, SharedState>, config_json: String) -> Resu
     let state = state.lock().unwrap();
     let mut config = state.config.lock().unwrap();
     let database = state.database.lock().unwrap();
-    let new_config: AppConfig = serde_json::from_str(&config_json)
-        .map_err(|e| AppError::Config(e.to_string()))?;
+    let new_config: AppConfig =
+        serde_json::from_str(&config_json).map_err(|e| AppError::Config(e.to_string()))?;
 
     let db_repo = crate::core::database::ConfigRepository::new(&database);
     let tools_json = serde_json::to_string(&new_config.tools)
@@ -111,7 +114,10 @@ pub fn scan_skills(state: State<'_, SharedState>) -> Result<ScanResult, AppError
     for skill_with_status in &skills {
         if let Ok(Some(existing)) = skills_repo.get_by_name(&skill_with_status.skill.name) {
             if existing.description != skill_with_status.skill.description {
-                let _ = skills_repo.update_description(&skill_with_status.skill.name, &skill_with_status.skill.description);
+                let _ = skills_repo.update_description(
+                    &skill_with_status.skill.name,
+                    &skill_with_status.skill.description,
+                );
             }
         }
     }
@@ -127,7 +133,9 @@ pub fn scan_skills(state: State<'_, SharedState>) -> Result<ScanResult, AppError
 }
 
 #[tauri::command]
-pub fn get_scan_diff(state: State<'_, SharedState>) -> Result<crate::core::scan_db::ScanDiff, AppError> {
+pub fn get_scan_diff(
+    state: State<'_, SharedState>,
+) -> Result<crate::core::scan_db::ScanDiff, AppError> {
     let state = state.lock().unwrap();
     let database = state.database.lock().unwrap();
 
@@ -139,13 +147,14 @@ pub fn get_scan_diff(state: State<'_, SharedState>) -> Result<crate::core::scan_
     let deleted_skills = skills_repo.get_deleted_skills()?;
 
     let to_status = |skills: Vec<Skill>| -> Vec<SkillWithStatus> {
-        skills.into_iter().map(|skill| {
-            SkillWithStatus {
+        skills
+            .into_iter()
+            .map(|skill| SkillWithStatus {
                 skill,
                 tool_statuses: std::collections::HashMap::new(),
                 rule_decisions: std::collections::HashMap::new(),
-            }
-        }).collect()
+            })
+            .collect()
     };
 
     Ok(crate::core::scan_db::ScanDiff {
@@ -163,21 +172,29 @@ pub fn get_skill_content(
     let state = state.lock().unwrap();
     let library = state.library.lock().unwrap();
     let skill_path = library.skill_path(&skill_id);
-    let skill_md = skill_path.join("SKILL.md");
 
-    if !skill_md.exists() {
-        return Err(AppError::SkillNotFound(format!(
-            "{} (looked at {})",
+    let skill_md = crate::core::fs_utils::find_skill_marker(&skill_path).ok_or_else(|| {
+        AppError::SkillNotFound(format!(
+            "{} (no SKILL.md/skill.md in {})",
             skill_id,
-            skill_md.display()
-        )));
-    }
+            skill_path.display()
+        ))
+    })?;
+
     std::fs::read_to_string(&skill_md).map_err(AppError::Io)
 }
 
 #[tauri::command]
 pub fn preview_local_install(path: String) -> Result<Vec<InstallCandidate>, AppError> {
     crate::core::scanner::Scanner::preview_local_install(std::path::Path::new(&path))
+}
+
+#[tauri::command]
+pub fn preview_git_install(
+    git_url: String,
+    subpath: Option<String>,
+) -> Result<Vec<InstallCandidate>, AppError> {
+    crate::core::scanner::Scanner::preview_git_install(&git_url, subpath.as_deref())
 }
 
 #[tauri::command]
@@ -189,10 +206,13 @@ pub fn install_local_skill(
 ) -> Result<String, AppError> {
     let _lock = RepoLock::acquire("install local skill")?;
 
-    let _ = window.emit("install-progress", serde_json::json!({
-        "stage": "installing",
-        "message": format!("Installing from {}...", source_path),
-    }));
+    let _ = window.emit(
+        "install-progress",
+        serde_json::json!({
+            "stage": "installing",
+            "message": format!("Installing from {}...", source_path),
+        }),
+    );
 
     let state = state.lock().unwrap();
     let library = state.library.lock().unwrap();
@@ -207,17 +227,19 @@ pub fn install_local_skill(
 
     let result = SkillEngine::install_skill(source, &library, &database, name)?;
 
-    let hash = ContentHash::hash_directory(&result.library_path)
-        .unwrap_or_default();
+    let hash = ContentHash::hash_directory(&result.library_path).unwrap_or_default();
     if !hash.is_empty() {
         let skills_repo = crate::core::database::SkillsRepository::new(&database);
         let _ = skills_repo.update_content_hash(&result.skill_id, &hash);
     }
 
-    let _ = window.emit("install-progress", serde_json::json!({
-        "stage": "complete",
-        "message": "Installation complete",
-    }));
+    let _ = window.emit(
+        "install-progress",
+        serde_json::json!({
+            "stage": "complete",
+            "message": "Installation complete",
+        }),
+    );
 
     Ok(result.library_path.to_string_lossy().to_string())
 }
@@ -232,38 +254,134 @@ pub fn install_git_skill(
 ) -> Result<String, AppError> {
     let _lock = RepoLock::acquire("install git skill")?;
 
-    let _ = window.emit("install-progress", serde_json::json!({
-        "stage": "cloning",
-        "message": format!("Cloning {}...", git_url),
-    }));
-
     let state = state.lock().unwrap();
+    let cancel_registry = state.cancel_registry.clone();
+
+    // Register cancellation
+    let install_key = format!("git-{}", git_url);
+    let cancel_token = cancel_registry.register(&install_key);
+    let _guard = crate::core::install_cancel::CancelRegistrationGuard::new(
+        cancel_registry.clone(),
+        install_key.clone(),
+    );
+
+    let window_clone = window.clone();
+    let progress_fn: std::sync::Arc<dyn Fn(&crate::core::git_clone::CloneProgress) + Send + Sync> =
+        std::sync::Arc::new(move |progress| {
+            let _ = window_clone.emit(
+                "install-progress",
+                serde_json::json!({
+                    "stage": progress.stage,
+                    "message": progress.message,
+                }),
+            );
+        });
+
+    let _ = window.emit(
+        "install-progress",
+        serde_json::json!({
+            "stage": "cloning",
+            "message": format!("Cloning {}...", git_url),
+        }),
+    );
+
     let library = state.library.lock().unwrap();
     let database = state.database.lock().unwrap();
+
+    // When no subpath specified, try installing all skills at once
+    if subpath.is_none() {
+        match SkillEngine::install_all_git_skills(
+            &git_url,
+            &library,
+            &database,
+            Some(cancel_token.clone()),
+            Some(progress_fn.clone()),
+            name.as_deref(),
+        ) {
+            Ok(results) => {
+                let _ = window.emit(
+                    "install-progress",
+                    serde_json::json!({
+                        "stage": "hashing",
+                        "message": "Computing content hashes...",
+                    }),
+                );
+
+                let skills_repo = crate::core::database::SkillsRepository::new(&database);
+                for result in &results {
+                    let hash =
+                        ContentHash::hash_directory(&result.library_path).unwrap_or_default();
+                    if !hash.is_empty() {
+                        let _ = skills_repo.update_content_hash(&result.skill_id, &hash);
+                    }
+                    if let Some(ref head_sha) = result.head_sha {
+                        let _ = skills_repo.update_source_revision(&result.skill_id, head_sha);
+                    }
+                }
+
+                let _ = window.emit(
+                    "install-progress",
+                    serde_json::json!({
+                        "stage": "complete",
+                        "message": format!("Installed {} skills", results.len()),
+                    }),
+                );
+
+                // Return comma-separated paths
+                let paths: Vec<String> = results
+                    .iter()
+                    .map(|r| r.library_path.to_string_lossy().to_string())
+                    .collect();
+                return Ok(paths.join(","));
+            }
+            Err(e) => {
+                eprintln!("[install_git_skill] install_all_git_skills failed: {}. Falling back to single-skill install.", e);
+                // Fall through to single-skill install below
+            }
+        }
+    }
 
     let source = crate::core::skill_engine::SkillSource::Git {
         url: git_url,
         subpath,
     };
 
-    let result = SkillEngine::install_skill(source, &library, &database, name)?;
+    let result = SkillEngine::install_skill_with_progress(
+        source,
+        &library,
+        &database,
+        name,
+        Some(cancel_token),
+        Some(progress_fn),
+    )?;
 
-    let _ = window.emit("install-progress", serde_json::json!({
-        "stage": "hashing",
-        "message": "Computing content hash...",
-    }));
+    let _ = window.emit(
+        "install-progress",
+        serde_json::json!({
+            "stage": "hashing",
+            "message": "Computing content hash...",
+        }),
+    );
 
-    let hash = ContentHash::hash_directory(&result.library_path)
-        .unwrap_or_default();
+    let hash = ContentHash::hash_directory(&result.library_path).unwrap_or_default();
     if !hash.is_empty() {
         let skills_repo = crate::core::database::SkillsRepository::new(&database);
         let _ = skills_repo.update_content_hash(&result.skill_id, &hash);
     }
 
-    let _ = window.emit("install-progress", serde_json::json!({
-        "stage": "complete",
-        "message": "Installation complete",
-    }));
+    // Update source_remote_revision if we got a HEAD SHA
+    if let Some(ref head_sha) = result.head_sha {
+        let skills_repo = crate::core::database::SkillsRepository::new(&database);
+        let _ = skills_repo.update_source_revision(&result.skill_id, head_sha);
+    }
+
+    let _ = window.emit(
+        "install-progress",
+        serde_json::json!({
+            "stage": "complete",
+            "message": "Installation complete",
+        }),
+    );
 
     Ok(result.library_path.to_string_lossy().to_string())
 }
@@ -323,7 +441,11 @@ pub fn fix_skill_link(
     let config = state.config.lock().unwrap();
     let tool = find_tool(&config, &tool_id)?;
     let skill_path = library.skill_path(&skill_name);
-    crate::core::linker::Linker::fix_link(&skill_path, std::path::Path::new(&tool.path), &skill_name)
+    crate::core::linker::Linker::fix_link(
+        &skill_path,
+        std::path::Path::new(&tool.path),
+        &skill_name,
+    )
 }
 
 #[tauri::command]
@@ -377,7 +499,11 @@ pub fn batch_link_skills(
     for skill_name in skill_names {
         let skill_path = library.skill_path(&skill_name);
         if skill_path.exists() {
-            if let Ok(_) = crate::core::linker::Linker::link(&skill_path, std::path::Path::new(&tool.path), &skill_name) {
+            if let Ok(_) = crate::core::linker::Linker::link(
+                &skill_path,
+                std::path::Path::new(&tool.path),
+                &skill_name,
+            ) {
                 count += 1;
             }
         }
@@ -396,7 +522,9 @@ pub fn batch_unlink_skills(
     let tool = find_tool(&config, &tool_id)?;
     let mut count = 0;
     for skill_name in skill_names {
-        if let Ok(_) = crate::core::linker::Linker::unlink(std::path::Path::new(&tool.path), &skill_name) {
+        if let Ok(_) =
+            crate::core::linker::Linker::unlink(std::path::Path::new(&tool.path), &skill_name)
+        {
             count += 1;
         }
     }
@@ -432,15 +560,24 @@ pub fn batch_export_skills(
                 source_type: SkillSourceType::LocalFolder,
                 is_deleted: false,
                 content_hash: None,
+                source_revision: None,
+                source_remote_revision: None,
+                source_update_status: Default::default(),
             });
         }
     }
     let count = skills.len();
     if as_zip {
-        crate::core::exporter::Exporter::export_to_zip(&skills, std::path::Path::new(&target_path))?;
+        crate::core::exporter::Exporter::export_to_zip(
+            &skills,
+            std::path::Path::new(&target_path),
+        )?;
     } else {
         for skill in &skills {
-            crate::core::exporter::Exporter::export_to_folder(skill, std::path::Path::new(&target_path))?;
+            crate::core::exporter::Exporter::export_to_folder(
+                skill,
+                std::path::Path::new(&target_path),
+            )?;
         }
     }
     Ok(count)
@@ -491,7 +628,11 @@ pub fn sync_skills(
                 continue;
             }
             if resolver.is_skill_allowed(&create_minimal_skill(&name, &skill_path), &tool.id) {
-                if let Ok(_) = crate::core::linker::Linker::link(&skill_path, std::path::Path::new(&tool.path), &name) {
+                if let Ok(_) = crate::core::linker::Linker::link(
+                    &skill_path,
+                    std::path::Path::new(&tool.path),
+                    &name,
+                ) {
                     count += 1;
                 }
             }
@@ -554,9 +695,15 @@ pub fn export_skill(
     }
     let skill = create_minimal_skill(&skill_name, &skill_path);
     if as_zip {
-        crate::core::exporter::Exporter::export_to_zip(&[skill], std::path::Path::new(&target_path))?;
+        crate::core::exporter::Exporter::export_to_zip(
+            &[skill],
+            std::path::Path::new(&target_path),
+        )?;
     } else {
-        crate::core::exporter::Exporter::export_to_folder(&skill, std::path::Path::new(&target_path))?;
+        crate::core::exporter::Exporter::export_to_folder(
+            &skill,
+            std::path::Path::new(&target_path),
+        )?;
     }
     Ok(())
 }
@@ -582,7 +729,25 @@ pub fn log_message(
     let state = state.lock().unwrap();
     let database = state.database.lock().unwrap();
     let repo = crate::core::database::AppLogsRepository::new(&database);
-    repo.log(&level, &message, &source)
+    repo.log(&level, &message, &source)?;
+
+    // Write to desktop log file if debug_logging is enabled
+    let config = state.config.lock().unwrap();
+    if config.debug_logging {
+        if let Some(desktop) = dirs::desktop_dir() {
+            let today = chrono::Utc::now().format("%Y%m%d").to_string();
+            let log_path = desktop.join(format!("skills-panel-{}.txt", today));
+            let timestamp = chrono::Utc::now().to_rfc3339();
+            let line = format!("[{}] [{}] [{}] {}\n", timestamp, level, source, message);
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_path)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -612,14 +777,15 @@ fn create_minimal_skill(name: &str, path: &std::path::Path) -> Skill {
         mtime_ms: 0,
         source_type: SkillSourceType::LocalFolder,
         is_deleted: false,
-                content_hash: None,
+        content_hash: None,
+        source_revision: None,
+        source_remote_revision: None,
+        source_update_status: Default::default(),
     }
 }
 
 #[tauri::command]
-pub fn get_installed_skills_from_db(
-    state: State<'_, SharedState>,
-) -> Result<Vec<Skill>, AppError> {
+pub fn get_installed_skills_from_db(state: State<'_, SharedState>) -> Result<Vec<Skill>, AppError> {
     let state = state.lock().unwrap();
     let database = state.database.lock().unwrap();
     let repo = crate::core::database::SkillsRepository::new(&database);
@@ -659,10 +825,7 @@ pub fn mark_skill_uninstalled(
 }
 
 #[tauri::command]
-pub fn upsert_skill_to_db(
-    state: State<'_, SharedState>,
-    skill: Skill,
-) -> Result<(), AppError> {
+pub fn upsert_skill_to_db(state: State<'_, SharedState>, skill: Skill) -> Result<(), AppError> {
     let state = state.lock().unwrap();
     let database = state.database.lock().unwrap();
     let repo = crate::core::database::SkillsRepository::new(&database);
@@ -743,9 +906,7 @@ pub fn log_app_message(
 }
 
 #[tauri::command]
-pub fn get_tools_from_db(
-    state: State<'_, SharedState>,
-) -> Result<Vec<Tool>, AppError> {
+pub fn get_tools_from_db(state: State<'_, SharedState>) -> Result<Vec<Tool>, AppError> {
     let state = state.lock().unwrap();
     let database = state.database.lock().unwrap();
     let repo = crate::core::database::ToolsRepository::new(&database);
@@ -753,10 +914,7 @@ pub fn get_tools_from_db(
 }
 
 #[tauri::command]
-pub fn upsert_tool_to_db(
-    state: State<'_, SharedState>,
-    tool: Tool,
-) -> Result<(), AppError> {
+pub fn upsert_tool_to_db(state: State<'_, SharedState>, tool: Tool) -> Result<(), AppError> {
     let state = state.lock().unwrap();
     let database = state.database.lock().unwrap();
     let repo = crate::core::database::ToolsRepository::new(&database);
@@ -799,12 +957,39 @@ pub fn get_linked_tool_ids(
 }
 
 #[tauri::command]
-pub fn cancel_install(
-    state: State<'_, SharedState>,
-    key: String,
-) -> Result<bool, AppError> {
+pub fn cancel_install(state: State<'_, SharedState>, key: String) -> Result<bool, AppError> {
     let state = state.lock().unwrap();
     Ok(state.cancel_registry.cancel(&key))
+}
+
+#[tauri::command]
+pub fn check_skill_update(
+    state: State<'_, SharedState>,
+    skill_id: String,
+) -> Result<bool, AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+
+    let skills_repo = crate::core::database::SkillsRepository::new(&database);
+    let skill = skills_repo
+        .get_by_id(&skill_id)?
+        .ok_or_else(|| AppError::SkillNotFound(skill_id))?;
+
+    crate::core::git_update::check_git_skill_update(&skill, &database)
+}
+
+#[tauri::command]
+pub fn update_skill(state: State<'_, SharedState>, skill_id: String) -> Result<String, AppError> {
+    let state = state.lock().unwrap();
+    let library = state.library.lock().unwrap();
+    let database = state.database.lock().unwrap();
+
+    let skills_repo = crate::core::database::SkillsRepository::new(&database);
+    let skill = skills_repo
+        .get_by_id(&skill_id)?
+        .ok_or_else(|| AppError::SkillNotFound(skill_id))?;
+
+    crate::core::git_update::update_git_skill(&skill, &library, &database, None)
 }
 
 // ── Project / Workspace Commands ─────────────────────────────────────
@@ -833,10 +1018,7 @@ pub fn list_projects(
 }
 
 #[tauri::command]
-pub fn delete_project(
-    state: State<'_, SharedState>,
-    project_id: String,
-) -> Result<(), AppError> {
+pub fn delete_project(state: State<'_, SharedState>, project_id: String) -> Result<(), AppError> {
     let state = state.lock().unwrap();
     let database = state.database.lock().unwrap();
     let repo = crate::core::database::ProjectsRepository::new(&database);
@@ -850,23 +1032,21 @@ pub fn scan_project(
 ) -> Result<crate::core::models::ProjectDto, AppError> {
     let state = state.lock().unwrap();
     let database = state.database.lock().unwrap();
-    let library = state.library.lock().unwrap();
+    let _library = state.library.lock().unwrap();
 
     let projects_repo = crate::core::database::ProjectsRepository::new(&database);
     let project = projects_repo
         .get_by_id(&project_id)?
         .ok_or_else(|| AppError::SkillNotFound(format!("Project not found: {}", project_id)))?;
 
-    let mut skills = crate::core::project_scanner::ProjectScanner::scan_project_skills(
-        &project.root_path,
-    )?;
+    let mut skills =
+        crate::core::project_scanner::ProjectScanner::scan_project_skills(&project.root_path)?;
 
     let skills_repo = crate::core::database::SkillsRepository::new(&database);
     let center_skills = skills_repo.get_all_active()?;
 
     crate::core::project_scanner::ProjectScanner::classify_sync_status(&mut skills, &center_skills);
-    let sync_health =
-        crate::core::project_scanner::ProjectScanner::compute_sync_health(&skills);
+    let sync_health = crate::core::project_scanner::ProjectScanner::compute_sync_health(&skills);
 
     Ok(crate::core::models::ProjectDto {
         project,
@@ -931,11 +1111,11 @@ mod tests {
     use crate::core::library::SkillLibrary;
     use std::fs;
     use std::io::Write;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use tempfile::TempDir;
+    use zip::write::SimpleFileOptions;
     use zip::CompressionMethod;
     use zip::ZipWriter;
-    use zip::write::SimpleFileOptions;
 
     fn create_test_config(library_path: &Path) -> AppConfig {
         AppConfig {
@@ -1039,5 +1219,76 @@ mod tests {
         let result = SkillEngine::install_skill(source, &library, &database, None);
 
         assert!(matches!(result, Err(AppError::Zip(_))));
+    }
+
+    #[test]
+    fn test_install_local_skill_folder_legacy_marker() {
+        let temp = TempDir::new().unwrap();
+        let library = create_test_library(temp.path());
+        let database = create_test_database(temp.path());
+        let source = temp.path().join("legacy-skill");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            source.join("skill.md"),
+            "---\nname: legacy-skill\ndescription: legacy marker\n---\n",
+        )
+        .unwrap();
+
+        let result = SkillEngine::install_skill(
+            crate::core::skill_engine::SkillSource::Folder(source),
+            &library,
+            &database,
+            None,
+        )
+        .unwrap();
+
+        assert!(library.skill_exists("legacy-skill"));
+        assert_eq!(result.library_path, library.skill_path("legacy-skill"));
+    }
+
+    #[test]
+    fn test_install_local_skill_folder_readme_only_rejected() {
+        let temp = TempDir::new().unwrap();
+        let library = create_test_library(temp.path());
+        let database = create_test_database(temp.path());
+        let source = temp.path().join("docs-only");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("README.md"), "# just docs").unwrap();
+        fs::write(source.join("CLAUDE.md"), "# instructions").unwrap();
+
+        let result = SkillEngine::install_skill(
+            crate::core::skill_engine::SkillSource::Folder(source),
+            &library,
+            &database,
+            None,
+        );
+
+        assert!(matches!(result, Err(AppError::InvalidSkill(_))));
+    }
+
+    #[test]
+    fn test_install_local_skill_folder_auto_detects_nested_skill() {
+        let temp = TempDir::new().unwrap();
+        let library = create_test_library(temp.path());
+        let database = create_test_database(temp.path());
+        let source = temp.path().join("repo-like");
+        fs::create_dir_all(source.join("skills/web-search")).unwrap();
+        fs::write(source.join("README.md"), "# repo readme").unwrap();
+        fs::write(
+            source.join("skills/web-search/SKILL.md"),
+            "---\nname: web-search\ndescription: nested\n---\n",
+        )
+        .unwrap();
+
+        let result = SkillEngine::install_skill(
+            crate::core::skill_engine::SkillSource::Folder(source),
+            &library,
+            &database,
+            None,
+        )
+        .unwrap();
+
+        assert!(library.skill_exists("web-search"));
+        assert_eq!(result.library_path, library.skill_path("web-search"));
     }
 }

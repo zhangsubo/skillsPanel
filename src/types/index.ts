@@ -13,6 +13,8 @@ export type SyncMode = 'symlink' | 'copy';
 
 export type DryRunActionType = 'create-link' | 'remove-link' | 'fix-link' | 'skip-blocked' | 'skip-directory';
 
+export type SourceUpdateStatus = 'up-to-date' | 'update-available' | 'unknown';
+
 // ── Interfaces (Rust structs) ──
 
 export interface Skill {
@@ -30,6 +32,9 @@ export interface Skill {
   mtime_ms: number;
   source_type: SkillSourceType;
   is_deleted: boolean;
+  source_revision: string | null;
+  source_remote_revision: string | null;
+  source_update_status: SourceUpdateStatus;
 }
 
 export interface Tool {
@@ -146,4 +151,9 @@ export interface AppConfig {
   sync: SyncConfig;
   install: InstallConfig;
   rules: RulesConfig;
+}
+
+export interface InstallProgress {
+  stage: string;
+  message: string;
 }

@@ -1,8 +1,8 @@
+use crate::core::config::AppConfig;
 use crate::core::error::AppError;
 use crate::core::fs_utils;
-use crate::core::models::*;
-use crate::core::config::AppConfig;
 use crate::core::library::SkillLibrary;
+use crate::core::models::*;
 use crate::core::skill_engine::SkillEngine;
 use std::collections::HashMap;
 use std::fs;
@@ -11,7 +11,10 @@ use std::path::{Path, PathBuf};
 pub struct Scanner;
 
 impl Scanner {
-    pub fn scan_sources(config: &AppConfig, library: &SkillLibrary) -> Result<Vec<SkillWithStatus>, AppError> {
+    pub fn scan_sources(
+        config: &AppConfig,
+        library: &SkillLibrary,
+    ) -> Result<Vec<SkillWithStatus>, AppError> {
         let mut skills = Vec::new();
         let mut seen_names = HashMap::new();
 
@@ -23,10 +26,13 @@ impl Scanner {
             if !source_path.exists() {
                 continue;
             }
-            let skill_dirs = Self::find_skill_dirs(&source_path, &config.exclude_paths, source.recursive);
+            let skill_dirs =
+                Self::find_skill_dirs(&source_path, &config.exclude_paths, source.recursive);
 
             for dir in skill_dirs {
-                if let Some(skill) = Self::parse_skill_dir(&dir, &source.group, "local-folder", library) {
+                if let Some(skill) =
+                    Self::parse_skill_dir(&dir, &source.group, "local-folder", library)
+                {
                     if let Some(existing) = seen_names.get(&skill.skill.name) {
                         if existing != &dir {
                             continue;
@@ -44,7 +50,9 @@ impl Scanner {
                 continue;
             }
             let lib_path = library.skill_path(&name);
-            if let Some(skill) = Self::parse_skill_dir(&lib_path, "library", "local-folder", library) {
+            if let Some(skill) =
+                Self::parse_skill_dir(&lib_path, "library", "local-folder", library)
+            {
                 seen_names.insert(name, lib_path);
                 skills.push(skill);
             }
@@ -57,8 +65,14 @@ impl Scanner {
                     continue;
                 }
                 let tool_dir = std::path::Path::new(&tool.path);
-                let status = crate::core::linker::Linker::check_status(skill_path, tool_dir, &skill_with_status.skill.name);
-                skill_with_status.tool_statuses.insert(tool.id.clone(), status);
+                let status = crate::core::linker::Linker::check_status(
+                    skill_path,
+                    tool_dir,
+                    &skill_with_status.skill.name,
+                );
+                skill_with_status
+                    .tool_statuses
+                    .insert(tool.id.clone(), status);
             }
         }
 
@@ -66,8 +80,6 @@ impl Scanner {
     }
 
     pub fn scan_skills(config: &AppConfig, library: &SkillLibrary) -> Result<ScanResult, AppError> {
-        use crate::core::resolver::Resolver;
-
         let skills = Self::scan_sources(config, library)?;
         let total_skills = skills.len();
         let total_tools = config.tools.len();
@@ -76,7 +88,7 @@ impl Scanner {
         let mut blocked_count = 0;
 
         for skill in &skills {
-            for (tool_name, status) in &skill.tool_statuses {
+            for (_tool_name, status) in &skill.tool_statuses {
                 match status {
                     SkillToolStatus::Linked => linked_count += 1,
                     SkillToolStatus::Wrong | SkillToolStatus::Directory => conflict_count += 1,
@@ -96,22 +108,33 @@ impl Scanner {
         })
     }
 
-    pub(crate) fn find_skill_dirs(root: &Path, exclude: &[String], recursive: bool) -> Vec<PathBuf> {
+    pub(crate) fn find_skill_dirs(
+        root: &Path,
+        exclude: &[String],
+        recursive: bool,
+    ) -> Vec<PathBuf> {
         fs_utils::find_skill_dirs(root, exclude, recursive)
     }
 
-    fn parse_skill_dir(dir: &Path, group: &str, source_type: &str, library: &SkillLibrary) -> Option<SkillWithStatus> {
-        let skill_md = dir.join("SKILL.md");
+    fn parse_skill_dir(
+        dir: &Path,
+        group: &str,
+        source_type: &str,
+        library: &SkillLibrary,
+    ) -> Option<SkillWithStatus> {
+        let skill_md = fs_utils::find_skill_marker(dir)?;
         let content = fs::read_to_string(&skill_md).ok()?;
         let (frontmatter, _body) = SkillEngine::parse_frontmatter(&content)?;
 
-        let name = frontmatter.get("name")
+        let name = frontmatter
+            .get("name")
             .and_then(|v| v.as_str())
             .map(String::from)
             .or_else(|| dir.file_name().map(|n| n.to_string_lossy().into_owned()))
             .unwrap_or_default();
 
-        let description = frontmatter.get("description")
+        let description = frontmatter
+            .get("description")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
@@ -121,7 +144,13 @@ impl Scanner {
         let id = SkillLibrary::compute_skill_id(&name, &library_path);
 
         let mtime = fs::metadata(dir).ok().and_then(|m| m.modified().ok());
-        let mtime_ms = mtime.map(|t| t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)).unwrap_or(0);
+        let mtime_ms = mtime
+            .map(|t| {
+                t.duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
 
         let library_path = library.skill_path(&name).to_string_lossy().into_owned();
 
@@ -131,7 +160,11 @@ impl Scanner {
             path_hash,
             library_path,
             original_source_path: Some(dir.to_string_lossy().into_owned()),
-            original_git_url: if source_type == "git" { Some(dir.to_string_lossy().into_owned()) } else { None },
+            original_git_url: if source_type == "git" {
+                Some(dir.to_string_lossy().into_owned())
+            } else {
+                None
+            },
             original_git_subpath: None,
             group: group.to_string(),
             description,
@@ -145,6 +178,9 @@ impl Scanner {
             },
             is_deleted: false,
             content_hash: None,
+            source_revision: None,
+            source_remote_revision: None,
+            source_update_status: Default::default(),
         };
 
         Some(SkillWithStatus {
@@ -156,7 +192,10 @@ impl Scanner {
 
     pub fn preview_local_install(path: &Path) -> Result<Vec<InstallCandidate>, AppError> {
         if !path.exists() {
-            return Err(AppError::Validation(format!("Path does not exist: {}", path.display())));
+            return Err(AppError::Validation(format!(
+                "Path does not exist: {}",
+                path.display()
+            )));
         }
 
         let mut candidates = Vec::new();
@@ -165,21 +204,29 @@ impl Scanner {
             let temp_dir = tempfile::tempdir()?;
             let extracted = Self::extract_zip(path, temp_dir.path())?;
             for skill_dir in Self::find_skill_dirs(&extracted, &[], true) {
-                if let Some(candidate) = Self::make_candidate(&skill_dir, path.to_string_lossy().as_ref(), "local-zip") {
+                if let Some(candidate) =
+                    Self::make_candidate(&skill_dir, path.to_string_lossy().as_ref(), "local-zip")
+                {
                     candidates.push(candidate);
                 }
             }
         } else if path.is_dir() {
-            let skill_md = path.join("SKILL.md");
-            if skill_md.exists() {
-                if let Some(candidate) = Self::make_candidate(path, path.to_string_lossy().as_ref(), "local-folder") {
+            if fs_utils::is_valid_skill_dir(path) {
+                if let Some(candidate) =
+                    Self::make_candidate(path, path.to_string_lossy().as_ref(), "local-folder")
+                {
                     candidates.push(candidate);
                 }
             }
-            let sub_skills = Self::find_skill_dirs(path, &["node_modules".into(), ".git".into()], true);
+            let sub_skills =
+                Self::find_skill_dirs(path, &["node_modules".into(), ".git".into()], true);
             for skill_dir in sub_skills {
                 if skill_dir != path {
-                    if let Some(candidate) = Self::make_candidate(&skill_dir, path.to_string_lossy().as_ref(), "local-folder") {
+                    if let Some(candidate) = Self::make_candidate(
+                        &skill_dir,
+                        path.to_string_lossy().as_ref(),
+                        "local-folder",
+                    ) {
                         candidates.push(candidate);
                     }
                 }
@@ -189,13 +236,80 @@ impl Scanner {
         Ok(candidates)
     }
 
-    fn make_candidate(skill_dir: &Path, source_path: &str, source_type: &str) -> Option<InstallCandidate> {
-        let skill_md = skill_dir.join("SKILL.md");
+    pub fn preview_git_install(
+        url: &str,
+        subpath: Option<&str>,
+    ) -> Result<Vec<InstallCandidate>, AppError> {
+        let parsed = crate::core::git_url_parser::GitUrlParser::parse_git_source(url);
+
+        // Clone to cache
+        let temp_dir = tempfile::tempdir()?;
+        let clone_root = temp_dir.path().join("repo");
+
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        crate::core::git_clone::clone_with_cache(
+            &parsed.clone_url,
+            &clone_root,
+            parsed.branch.as_deref(),
+            Some(cancel),
+            None,
+        )?;
+
+        // Resolve subpath
+        let target_dir = if let Some(sub) = subpath.or(parsed.subpath.as_deref()) {
+            let validated = crate::core::fs_utils::validate_relative_subpath(sub)?;
+            let path = clone_root.join(&validated);
+            if !path.exists() || !path.is_dir() {
+                return Err(AppError::InvalidSkill(format!(
+                    "Subpath '{}' not found in repository",
+                    validated
+                )));
+            }
+            path
+        } else {
+            clone_root.clone()
+        };
+
+        let mut candidates = Vec::new();
+
+        // Check if target dir itself is a skill
+        if crate::core::fs_utils::is_valid_skill_dir(&target_dir) {
+            if let Some(candidate) = Self::make_candidate(&target_dir, url, "git") {
+                candidates.push(candidate);
+            }
+        }
+
+        // Find nested skills
+        let sub_skills =
+            Self::find_skill_dirs(&target_dir, &["node_modules".into(), ".git".into()], true);
+        for skill_dir in sub_skills {
+            if skill_dir != target_dir {
+                if let Some(candidate) = Self::make_candidate(&skill_dir, url, "git") {
+                    candidates.push(candidate);
+                }
+            }
+        }
+
+        Ok(candidates)
+    }
+
+    fn make_candidate(
+        skill_dir: &Path,
+        source_path: &str,
+        _source_type: &str,
+    ) -> Option<InstallCandidate> {
+        let skill_md = fs_utils::find_skill_marker(skill_dir)?;
         let content = fs::read_to_string(&skill_md).ok()?;
         let (frontmatter, _) = parse_frontmatter(&content)?;
 
-        let detected_name = frontmatter.get("name").and_then(|v| v.as_str()).map(String::from);
-        let description = frontmatter.get("description").and_then(|v| v.as_str()).map(String::from);
+        let detected_name = frontmatter
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let description = frontmatter
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let has_name = detected_name.is_some();
 
         Some(InstallCandidate {
@@ -206,7 +320,11 @@ impl Scanner {
             source_path: source_path.to_string(),
             skill_root: skill_dir.to_string_lossy().into_owned(),
             valid: has_name || frontmatter.contains_key("name"),
-            error: if !has_name { Some("SKILL.md must contain a 'name' field in frontmatter".into()) } else { None },
+            error: if !has_name {
+                Some("SKILL.md must contain a 'name' field in frontmatter".into())
+            } else {
+                None
+            },
         })
     }
 
@@ -229,8 +347,14 @@ mod tests {
     fn test_parse_frontmatter_valid() {
         let content = "---\nname: test-skill\ndescription: A test skill\n---\n# Body\n";
         let (frontmatter, body) = parse_frontmatter(content).unwrap();
-        assert_eq!(frontmatter.get("name").unwrap().as_str().unwrap(), "test-skill");
-        assert_eq!(frontmatter.get("description").unwrap().as_str().unwrap(), "A test skill");
+        assert_eq!(
+            frontmatter.get("name").unwrap().as_str().unwrap(),
+            "test-skill"
+        );
+        assert_eq!(
+            frontmatter.get("description").unwrap().as_str().unwrap(),
+            "A test skill"
+        );
         assert_eq!(body, "# Body");
     }
 
@@ -286,7 +410,11 @@ mod tests {
         fs::create_dir(&root).unwrap();
 
         fs::create_dir_all(root.join("node_modules/skill-c")).unwrap();
-        fs::write(root.join("node_modules/skill-c/SKILL.md"), "---\nname: c\n---").unwrap();
+        fs::write(
+            root.join("node_modules/skill-c/SKILL.md"),
+            "---\nname: c\n---",
+        )
+        .unwrap();
 
         fs::create_dir(root.join("skill-d")).unwrap();
         fs::write(root.join("skill-d/SKILL.md"), "---\nname: d\n---").unwrap();
@@ -301,7 +429,11 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let dir = temp.path().join("my-skill");
         fs::create_dir(&dir).unwrap();
-        fs::write(dir.join("SKILL.md"), "---\nname: my-skill\ndescription: desc\n---").unwrap();
+        fs::write(
+            dir.join("SKILL.md"),
+            "---\nname: my-skill\ndescription: desc\n---",
+        )
+        .unwrap();
 
         let candidate = Scanner::make_candidate(&dir, "/source", "local-folder").unwrap();
         assert_eq!(candidate.detected_name, Some("my-skill".to_string()));

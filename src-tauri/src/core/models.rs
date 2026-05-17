@@ -18,14 +18,35 @@ pub struct Skill {
     pub source_type: SkillSourceType,
     pub is_deleted: bool,
     pub content_hash: Option<String>,
+    #[serde(default)]
+    pub source_revision: Option<String>,
+    #[serde(default)]
+    pub source_remote_revision: Option<String>,
+    #[serde(default)]
+    pub source_update_status: SourceUpdateStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum SkillSourceType {
+    #[default]
+    LocalFolder,
+    LocalZip,
+    Git,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum SkillSourceType {
-    LocalFolder,
-    LocalZip,
-    Git,
+pub enum SourceUpdateStatus {
+    UpToDate,
+    UpdateAvailable,
+    Unknown,
+}
+
+impl Default for SourceUpdateStatus {
+    fn default() -> Self {
+        Self::UpToDate
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

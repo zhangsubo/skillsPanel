@@ -1,11 +1,13 @@
 # Skills Panel
 
+> 自己的一个vibe coding 练手及重复造轮子之作。非常感谢已经开源或者未开源的多个 Agent Skills 管理工具供参考。
+
 Agent Skill Unified Management Tool — 统一管理 AI 编程工具的技能（Skills），支持本地、ZIP、Git 安装，技能同步，项目工作区管理。
 
 ## 功能
 
 - **技能管理**：扫描本地技能目录，安装技能（本地文件夹/ZIP/Git），查看技能详情
-- **多工具同步**：将技能通过 Symlink 或 Copy 模式同步到 Cursor、Claude Code、OpenCode、Codex 等多个 AI 工具
+- **多工具同步**：将技能通过 Symlink  模式同步到 Cursor、Claude Code、OpenCode、Codex 等多个 AI 工具
 - **项目工作区**：扫描项目中的技能目录（`.claude/skills/`、`.cursor/skills/` 等），支持技能导入/导出中央仓库、同步健康状态检测
 - **Git 安装增强**：Tree URL 解析、多技能仓库检测、克隆缓存、进度推送、取消机制
 - **安全加固**：AES-256-GCM 敏感配置加密、RepoLock 安装互斥锁、内容哈希去重
@@ -101,7 +103,7 @@ npm run tauri build
 - **[skills-manager](https://github.com/xingkongliang/skills-manager)** — 参考了这个项目的很多有意思的设计和想法，包括数据库设计、安装流程、场景系统和项目工作区模块
 - **[GitNexus](https://github.com/abhigyanpatwari/GitNexus)** — 代码分析工具，用于理解代码库结构和执行流程
 - **[Understand-Anything](https://understand-anything.com/)** — 代码分析工具，用于生成交互式知识图谱
-- **xiaomi mimo Orbit 百万亿 Token 计划** (https://platform.xiaomimimo.com/docs/zh-CN/news/v2.5-open-sourced) — 感谢提供的 Token 支持
+- **[xiaomi mimo Orbit 百万亿 Token 计划]( https://platform.xiaomimimo.com/docs/zh-CN/news/v2.5-open-sourced) **— 感谢提供的 Token 支持
 - **商汤科技** — 感谢提供的免费 Token Plan，使用了 deepseek-v4-flash 模型进行开发
 
 ## License

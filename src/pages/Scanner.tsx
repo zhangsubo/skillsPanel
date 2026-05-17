@@ -3,9 +3,10 @@ import { useTranslation } from 'react-i18next'
 import {
   installLocalSkill,
   installGitSkill,
+  previewGitInstall,
 } from '@/api/install'
 import { scanSkills, getScanDiff, getLibrary } from '@/api/library'
-import type { SkillWithStatus } from '@/types'
+import type { SkillWithStatus, InstallCandidate } from '@/types'
 import type { ScanDiff } from '@/api/library'
 import {
   Tabs,
@@ -219,20 +220,78 @@ function GitInstallTab() {
   const [subpath, setSubpath] = useState('')
   const [skillName, setSkillName] = useState('')
   const [installing, setInstalling] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
+  const [candidates, setCandidates] = useState<InstallCandidate[] | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [progress, setProgress] = useState<{ stage: string; message: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  const handleInstall = async () => {
+  useEffect(() => {
+    if (!isTauriEnv()) return
+
+    let unlisten: (() => void) | undefined
+
+    const setupProgressListener = async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event')
+        unlisten = await listen<{ stage: string; message: string }>('install-progress', (event) => {
+          setProgress(event.payload)
+        })
+      } catch (err) {
+        console.warn('Failed to setup progress listener:', err)
+      }
+    }
+
+    setupProgressListener()
+
+    return () => {
+      if (unlisten) unlisten()
+    }
+  }, [])
+
+  const handlePreview = async () => {
     if (!gitUrl.trim()) return
-    setInstalling(true)
+    setPreviewing(true)
     setError(null)
     setSuccess(null)
+    setCandidates(null)
+    setSelectedIds(new Set())
     try {
       const url = gitUrl.trim()
       const sub = subpath.trim() || undefined
-      const name = skillName.trim() || undefined
-      await installGitSkill(url, sub, name)
+      const result = await previewGitInstall(url, sub)
+      setCandidates(result)
+      // Auto-select all valid candidates
+      const validIds = new Set(result.filter(c => c.valid).map(c => c.candidate_id))
+      setSelectedIds(validIds)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
+  const handleInstallSelected = async () => {
+    if (!candidates || selectedIds.size === 0) return
+    setInstalling(true)
+    setError(null)
+    setSuccess(null)
+    setProgress(null)
+    try {
+      const url = gitUrl.trim()
+      const sub = subpath.trim() || undefined
+      let installedCount = 0
+      for (const candidate of candidates) {
+        if (!selectedIds.has(candidate.candidate_id)) continue
+        if (!candidate.valid) continue
+        const name = candidate.user_name_override || candidate.detected_name || undefined
+        await installGitSkill(url, sub, name)
+        installedCount++
+      }
       setSuccess(t('installSkill.gitSuccess', { url }))
+      setCandidates(null)
+      setSelectedIds(new Set())
       setGitUrl('')
       setSubpath('')
       setSkillName('')
@@ -240,7 +299,152 @@ function GitInstallTab() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setInstalling(false)
+      setProgress(null)
     }
+  }
+
+  const handleCancel = async () => {
+    if (!isTauriEnv()) return
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('cancel_install', { key: `git-${gitUrl.trim()}` })
+      setInstalling(false)
+      setProgress(null)
+    } catch (err) {
+      console.warn('Failed to cancel install:', err)
+    }
+  }
+
+  const toggleCandidate = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    if (!candidates) return
+    const validIds = candidates.filter(c => c.valid).map(c => c.candidate_id)
+    if (selectedIds.size === validIds.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(validIds))
+    }
+  }
+
+  // Show candidate selection if we have candidates
+  if (candidates && candidates.length > 0) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium">
+            {t('installSkill.previewResult', { count: candidates.length })}
+          </h3>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { setCandidates(null); setSelectedIds(new Set()) }}
+          >
+            {t('installSkill.back')}
+          </Button>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              checked={selectedIds.size === candidates.filter(c => c.valid).length && candidates.filter(c => c.valid).length > 0}
+              onCheckedChange={toggleAll}
+            />
+            <span className="text-sm text-muted-foreground">
+              {t('installSkill.selectAll')}
+            </span>
+          </div>
+
+          {candidates.map(candidate => (
+            <div
+              key={candidate.candidate_id}
+              className="flex items-start gap-3 rounded-lg border p-3"
+            >
+              <Checkbox
+                checked={selectedIds.has(candidate.candidate_id)}
+                onCheckedChange={() => toggleCandidate(candidate.candidate_id)}
+                disabled={!candidate.valid}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-sm">
+                    {candidate.detected_name || t('installSkill.unnamed')}
+                  </span>
+                  {!candidate.valid && (
+                    <Badge variant="destructive" className="text-xs">
+                      {t('installSkill.invalid')}
+                    </Badge>
+                  )}
+                </div>
+                {candidate.description && (
+                  <p className="text-xs text-muted-foreground mt-1 truncate">
+                    {candidate.description}
+                  </p>
+                )}
+                {candidate.error && (
+                  <p className="text-xs text-red-500 mt-1">{candidate.error}</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex gap-2">
+          <Button
+            onClick={handleInstallSelected}
+            disabled={selectedIds.size === 0 || installing}
+            className="flex-1"
+          >
+            {installing ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                {t('installSkill.installing')}
+              </>
+            ) : (
+              t('installSkill.installSelected', { count: selectedIds.size })
+            )}
+          </Button>
+          {installing && (
+            <Button onClick={handleCancel} variant="outline" disabled={!installing}>
+              {t('installSkill.cancel')}
+            </Button>
+          )}
+        </div>
+
+        {installing && progress && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">{progress.stage}</span>
+              <Loader2 className="h-4 w-4 animate-spin" />
+            </div>
+            <div className="h-2 rounded-full bg-muted overflow-hidden">
+              <div className="h-full bg-primary animate-pulse" style={{ width: '100%' }} />
+            </div>
+            <p className="text-xs text-muted-foreground truncate">{progress.message}</p>
+          </div>
+        )}
+
+        {error && (
+          <div className="flex items-center gap-2 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="flex items-center gap-2 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-600">
+            <Check className="h-4 w-4 shrink-0" />
+            {success}
+          </div>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -288,20 +492,44 @@ function GitInstallTab() {
         <p className="text-xs text-muted-foreground">{t('installSkill.nameHint')}</p>
       </div>
 
-      <Button
-        onClick={handleInstall}
-        disabled={!gitUrl.trim() || installing}
-        className="w-full"
-      >
-        {installing ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            {t('installSkill.installing')}
-          </>
-        ) : (
-          t('installSkill.installBtn')
+      {installing && progress && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">{progress.stage}</span>
+            <Loader2 className="h-4 w-4 animate-spin" />
+          </div>
+          <div className="h-2 rounded-full bg-muted overflow-hidden">
+            <div className="h-full bg-primary animate-pulse" style={{ width: '100%' }} />
+          </div>
+          <p className="text-xs text-muted-foreground truncate">{progress.message}</p>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <Button
+          onClick={handlePreview}
+          disabled={!gitUrl.trim() || previewing}
+          className="flex-1"
+        >
+          {previewing ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              {t('installSkill.previewing')}
+            </>
+          ) : (
+            t('installSkill.previewBtn')
+          )}
+        </Button>
+        {installing && (
+          <Button
+            onClick={handleCancel}
+            variant="outline"
+            disabled={!installing}
+          >
+            {t('installSkill.cancel')}
+          </Button>
         )}
-      </Button>
+      </div>
 
       {error && (
         <div className="flex items-center gap-2 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">

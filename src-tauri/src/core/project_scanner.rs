@@ -1,7 +1,7 @@
+use crate::core::database::Database;
 use crate::core::error::AppError;
 use crate::core::fs_utils;
 use crate::core::models::*;
-use crate::core::database::Database;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -9,9 +9,7 @@ use std::path::Path;
 pub struct ProjectScanner;
 
 impl ProjectScanner {
-    pub fn scan_project_skills(
-        project_root: &str,
-    ) -> Result<Vec<ProjectSkillInfo>, AppError> {
+    pub fn scan_project_skills(project_root: &str) -> Result<Vec<ProjectSkillInfo>, AppError> {
         let root = Path::new(project_root);
         if !root.exists() {
             return Err(AppError::Validation(format!(
@@ -26,7 +24,11 @@ impl ProjectScanner {
         let agent_configs = vec![
             ("claude-code", ".claude/skills", ".claude/skills-disabled"),
             ("cursor", ".cursor/skills", ".cursor/skills-disabled"),
-            ("opencode", ".config/opencode/skill", ".config/opencode/skill-disabled"),
+            (
+                "opencode",
+                ".config/opencode/skill",
+                ".config/opencode/skill-disabled",
+            ),
             ("codex", ".codex/skills", ".codex/skills-disabled"),
         ];
 
@@ -72,8 +74,8 @@ impl ProjectScanner {
                 continue;
             }
 
-            let skill_md = path.join("SKILL.md");
-            let content = fs::read_to_string(&skill_md).ok();
+            let skill_md = fs_utils::find_skill_marker(&path);
+            let content = skill_md.as_ref().and_then(|p| fs::read_to_string(p).ok());
             let (name, description, content_hash) = if let Some(content) = content {
                 let (fm, _) = fs_utils::parse_frontmatter(&content).unwrap_or_default();
                 let name = fm
@@ -124,8 +126,7 @@ impl ProjectScanner {
 
                     if pskill.content_hash.is_none() || center_skill.mtime_ms == 0 {
                         pskill.sync_status = SyncHealthStatus::InSync;
-                    } else if pskill.content_hash.as_deref()
-                        == center_skill.content_hash.as_deref()
+                    } else if pskill.content_hash.as_deref() == center_skill.content_hash.as_deref()
                     {
                         pskill.sync_status = SyncHealthStatus::InSync;
                     } else {
@@ -148,9 +149,9 @@ impl ProjectScanner {
 
         // Priority 2: content hash match
         if let Some(ref hash) = pskill.content_hash {
-            let hash_match = center_skills.iter().find(|s| {
-                s.content_hash.as_deref() == Some(hash)
-            });
+            let hash_match = center_skills
+                .iter()
+                .find(|s| s.content_hash.as_deref() == Some(hash));
             if let Some(skill) = hash_match {
                 return Some(skill);
             }
@@ -189,17 +190,22 @@ impl ProjectScanner {
             .ok_or_else(|| AppError::SkillNotFound(skill_name.to_string()))?;
 
         let source_path = Path::new(project_root)
-            .join(&pskill.agent.replace("claude-code", ".claude").replace("opencode", ".config/opencode"))
+            .join(
+                &pskill
+                    .agent
+                    .replace("claude-code", ".claude")
+                    .replace("opencode", ".config/opencode"),
+            )
             .join("skills")
             .join(&pskill.relative_path);
 
-        if !source_path.join("SKILL.md").exists() {
+        if !fs_utils::is_valid_skill_dir(&source_path) {
             // Try disabled directory
             let disabled_path = Path::new(project_root)
                 .join(&pskill.agent.replace("claude-code", ".claude"))
                 .join("skills-disabled")
                 .join(&pskill.relative_path);
-            if disabled_path.join("SKILL.md").exists() {
+            if fs_utils::is_valid_skill_dir(&disabled_path) {
                 return Self::install_to_center(&disabled_path, &pskill.name, database, library);
             }
             return Err(AppError::InvalidSkill(format!(
@@ -235,6 +241,9 @@ impl ProjectScanner {
             source_type: SkillSourceType::LocalFolder,
             is_deleted: false,
             content_hash: None,
+            source_revision: None,
+            source_remote_revision: None,
+            source_update_status: Default::default(),
         };
 
         let dest = if library.skill_exists(name) {
@@ -251,7 +260,7 @@ impl ProjectScanner {
     }
 
     pub fn export_center_skill_to_project(
-        database: &Database,
+        _database: &Database,
         skill_name: &str,
         project_root: &str,
         agent: &str,
@@ -270,7 +279,9 @@ impl ProjectScanner {
             _ => return Err(AppError::Validation(format!("Unknown agent: {}", agent))),
         };
 
-        let target = Path::new(project_root).join(agent_skills_dir).join(skill_name);
+        let target = Path::new(project_root)
+            .join(agent_skills_dir)
+            .join(skill_name);
         if target.exists() {
             return Err(AppError::Conflict(format!(
                 "Skill '{}' already exists in project for agent '{}'",
@@ -293,17 +304,18 @@ mod tests {
     #[test]
     fn test_scan_empty_project() {
         let temp = TempDir::new().unwrap();
-        let skills = ProjectScanner::scan_project_skills(
-            &temp.path().to_string_lossy(),
-        )
-        .unwrap();
+        let skills = ProjectScanner::scan_project_skills(&temp.path().to_string_lossy()).unwrap();
         assert!(skills.is_empty());
     }
 
     #[test]
     fn test_scan_project_with_skill() {
         let temp = TempDir::new().unwrap();
-        let skill_dir = temp.path().join(".claude").join("skills").join("test-skill");
+        let skill_dir = temp
+            .path()
+            .join(".claude")
+            .join("skills")
+            .join("test-skill");
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(
             skill_dir.join("SKILL.md"),
@@ -311,10 +323,7 @@ mod tests {
         )
         .unwrap();
 
-        let skills = ProjectScanner::scan_project_skills(
-            &temp.path().to_string_lossy(),
-        )
-        .unwrap();
+        let skills = ProjectScanner::scan_project_skills(&temp.path().to_string_lossy()).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "test-skill");
         assert_eq!(skills[0].agent, "claude-code");
@@ -324,7 +333,11 @@ mod tests {
     #[test]
     fn test_scan_disabled_skill() {
         let temp = TempDir::new().unwrap();
-        let disabled_dir = temp.path().join(".claude").join("skills-disabled").join("disabled-skill");
+        let disabled_dir = temp
+            .path()
+            .join(".claude")
+            .join("skills-disabled")
+            .join("disabled-skill");
         fs::create_dir_all(&disabled_dir).unwrap();
         fs::write(
             disabled_dir.join("SKILL.md"),
@@ -332,10 +345,7 @@ mod tests {
         )
         .unwrap();
 
-        let skills = ProjectScanner::scan_project_skills(
-            &temp.path().to_string_lossy(),
-        )
-        .unwrap();
+        let skills = ProjectScanner::scan_project_skills(&temp.path().to_string_lossy()).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "disabled-skill");
         assert!(!skills[0].enabled);

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 /// Current schema version. Bump this when adding new migration steps.
-const LATEST_VERSION: u32 = 4;
+const LATEST_VERSION: u32 = 5;
 
 pub struct Database {
     conn: Mutex<Connection>,
@@ -22,16 +22,12 @@ impl Database {
         conn.busy_timeout(std::time::Duration::from_secs(5))
             .map_err(|e| AppError::Config(format!("Failed to set busy timeout: {}", e)))?;
 
-        conn.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;",
-        )
-        .map_err(|e| AppError::Config(format!("Failed to set pragmas: {}", e)))?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .map_err(|e| AppError::Config(format!("Failed to set pragmas: {}", e)))?;
 
         Self::run_migrations(&conn)?;
 
-        let key_dir = db_path
-            .parent()
-            .unwrap_or(db_path);
+        let key_dir = db_path.parent().unwrap_or(db_path);
         let crypto = Crypto::new(key_dir).ok();
 
         Ok(Self {
@@ -81,6 +77,7 @@ impl Database {
             1 => Self::migrate_v1_to_v2(conn),
             2 => Self::migrate_v2_to_v3(conn),
             3 => Self::migrate_v3_to_v4(conn),
+            4 => Self::migrate_v4_to_v5(conn),
             _ => Err(AppError::Config(format!(
                 "No migration path from version {}",
                 from_version
@@ -204,7 +201,7 @@ impl Database {
                 root_path TEXT NOT NULL UNIQUE,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
-            );"
+            );",
         )
         .map_err(|e| AppError::Config(format!("Failed to create initial schema: {}", e)))?;
         Ok(())
@@ -223,9 +220,11 @@ impl Database {
                 cache_key TEXT PRIMARY KEY,
                 data TEXT NOT NULL,
                 fetched_at INTEGER NOT NULL
-            );"
+            );",
         )
-        .map_err(|e| AppError::Config(format!("Failed to create marketplace_cache table: {}", e)))?;
+        .map_err(|e| {
+            AppError::Config(format!("Failed to create marketplace_cache table: {}", e))
+        })?;
         Ok(())
     }
 
@@ -238,9 +237,22 @@ impl Database {
                 root_path TEXT NOT NULL UNIQUE,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
-            );"
+            );",
         )
         .map_err(|e| AppError::Config(format!("Failed to create projects table: {}", e)))?;
+        Ok(())
+    }
+
+    /// v4 → v5: Add source revision tracking columns to skills table.
+    fn migrate_v4_to_v5(conn: &Connection) -> Result<(), AppError> {
+        Self::add_column_if_missing(conn, "skills", "source_revision", "TEXT");
+        Self::add_column_if_missing(conn, "skills", "source_remote_revision", "TEXT");
+        Self::add_column_if_missing(
+            conn,
+            "skills",
+            "source_update_status",
+            "TEXT NOT NULL DEFAULT 'up-to-date'",
+        );
         Ok(())
     }
 
@@ -284,6 +296,12 @@ impl<'a> SkillsRepository<'a> {
             SkillSourceType::LocalFolder => "local-folder",
         };
 
+        let update_status_str = match skill.source_update_status {
+            crate::core::models::SourceUpdateStatus::UpToDate => "up-to-date",
+            crate::core::models::SourceUpdateStatus::UpdateAvailable => "update-available",
+            crate::core::models::SourceUpdateStatus::Unknown => "unknown",
+        };
+
         let now = chrono::Utc::now().to_rfc3339();
 
         conn.execute(
@@ -291,8 +309,9 @@ impl<'a> SkillsRepository<'a> {
                 id, name, path_hash, library_path, original_source_path,
                 original_git_url, original_git_subpath, group_name, description,
                 frontmatter, created_at, mtime_ms, source_type, is_deleted,
-                last_seen_at, first_seen_at, is_installed, installed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+                last_seen_at, first_seen_at, is_installed, installed_at,
+                source_revision, source_remote_revision, source_update_status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 path_hash = excluded.path_hash,
@@ -305,7 +324,10 @@ impl<'a> SkillsRepository<'a> {
                 is_deleted = 0,
                 last_seen_at = excluded.last_seen_at,
                 is_installed = 1,
-                installed_at = ?18",
+                installed_at = ?18,
+                source_revision = COALESCE(excluded.source_revision, skills.source_revision),
+                source_remote_revision = COALESCE(excluded.source_remote_revision, skills.source_remote_revision),
+                source_update_status = COALESCE(excluded.source_update_status, skills.source_update_status)",
             params![
                 skill.id, skill.name, skill.path_hash, skill.library_path,
                 skill.original_source_path, skill.original_git_url, skill.original_git_subpath,
@@ -313,6 +335,7 @@ impl<'a> SkillsRepository<'a> {
                 skill.mtime_ms, source_type_str, skill.is_deleted as i32,
                 now, skill.created_at,
                 1 as i32, now,
+                skill.source_revision, skill.source_remote_revision, update_status_str,
             ],
         )
         .map_err(|e| AppError::Config(format!("Failed to upsert skill: {}", e)))?;
@@ -326,7 +349,8 @@ impl<'a> SkillsRepository<'a> {
             .prepare(
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
-                        frontmatter, created_at, mtime_ms, source_type, is_deleted
+                        frontmatter, created_at, mtime_ms, source_type, is_deleted,
+                        source_revision, source_remote_revision, source_update_status
                  FROM skills WHERE is_installed = 1 AND is_deleted = 0 ORDER BY name",
             )
             .map_err(|e| AppError::Config(format!("Failed to prepare query: {}", e)))?;
@@ -340,7 +364,8 @@ impl<'a> SkillsRepository<'a> {
             .prepare(
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
-                        frontmatter, created_at, mtime_ms, source_type, is_deleted
+                        frontmatter, created_at, mtime_ms, source_type, is_deleted,
+                        source_revision, source_remote_revision, source_update_status
                  FROM skills WHERE is_deleted = 0 ORDER BY name",
             )
             .map_err(|e| AppError::Config(format!("Failed to prepare query: {}", e)))?;
@@ -404,7 +429,8 @@ impl<'a> SkillsRepository<'a> {
             .query_row(
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
-                        frontmatter, created_at, mtime_ms, source_type, is_deleted
+                        frontmatter, created_at, mtime_ms, source_type, is_deleted,
+                        source_revision, source_remote_revision, source_update_status
                  FROM skills WHERE name = ?1",
                 params![name],
                 |row| Self::row_to_skill(row),
@@ -431,6 +457,36 @@ impl<'a> SkillsRepository<'a> {
             params![content_hash, skill_id],
         )
         .map_err(|e| AppError::Config(format!("Failed to update content hash: {}", e)))?;
+        Ok(())
+    }
+
+    pub fn update_source_revision(&self, skill_id: &str, head_sha: &str) -> Result<(), AppError> {
+        let conn = self.db.connection();
+        conn.execute(
+            "UPDATE skills SET source_revision = ?1, source_remote_revision = ?1, source_update_status = 'up-to-date' WHERE id = ?2",
+            params![head_sha, skill_id],
+        )
+        .map_err(|e| AppError::Config(format!("Failed to update source revision: {}", e)))?;
+        Ok(())
+    }
+
+    pub fn update_source_remote_revision(
+        &self,
+        skill_id: &str,
+        remote_revision: &str,
+        update_status: &crate::core::models::SourceUpdateStatus,
+    ) -> Result<(), AppError> {
+        let conn = self.db.connection();
+        let status_str = match update_status {
+            crate::core::models::SourceUpdateStatus::UpToDate => "up-to-date",
+            crate::core::models::SourceUpdateStatus::UpdateAvailable => "update-available",
+            crate::core::models::SourceUpdateStatus::Unknown => "unknown",
+        };
+        conn.execute(
+            "UPDATE skills SET source_remote_revision = ?1, source_update_status = ?2 WHERE id = ?3",
+            params![remote_revision, status_str, skill_id],
+        )
+        .map_err(|e| AppError::Config(format!("Failed to update source remote revision: {}", e)))?;
         Ok(())
     }
 
@@ -466,11 +522,21 @@ impl<'a> SkillsRepository<'a> {
                 is_deleted = 0,
                 last_seen_at = excluded.last_seen_at",
             params![
-                skill.id, skill.name, skill.path_hash, skill.library_path,
-                skill.original_source_path, skill.original_git_url, skill.original_git_subpath,
-                skill.group, skill.description, frontmatter_json, skill.created_at,
-                skill.mtime_ms, source_type_str,
-                skill.is_deleted as i32, scan_timestamp,
+                skill.id,
+                skill.name,
+                skill.path_hash,
+                skill.library_path,
+                skill.original_source_path,
+                skill.original_git_url,
+                skill.original_git_subpath,
+                skill.group,
+                skill.description,
+                frontmatter_json,
+                skill.created_at,
+                skill.mtime_ms,
+                source_type_str,
+                skill.is_deleted as i32,
+                scan_timestamp,
             ],
         )
         .map_err(|e| AppError::Config(format!("Failed to upsert skill: {}", e)))?;
@@ -501,7 +567,8 @@ impl<'a> SkillsRepository<'a> {
             .prepare(
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
-                        frontmatter, created_at, mtime_ms, source_type, is_deleted
+                        frontmatter, created_at, mtime_ms, source_type, is_deleted,
+                        source_revision, source_remote_revision, source_update_status
                  FROM skills WHERE first_seen_at = ?1 AND is_deleted = 0
                  ORDER BY name",
             )
@@ -516,14 +583,17 @@ impl<'a> SkillsRepository<'a> {
             .prepare(
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
-                        frontmatter, created_at, mtime_ms, source_type, is_deleted
+                        frontmatter, created_at, mtime_ms, source_type, is_deleted,
+                        source_revision, source_remote_revision, source_update_status
                  FROM skills
                  WHERE last_seen_at = ?1
                  AND first_seen_at != last_seen_at
                  AND is_deleted = 0
                  ORDER BY name",
             )
-            .map_err(|e| AppError::Config(format!("Failed to prepare updated skills query: {}", e)))?;
+            .map_err(|e| {
+                AppError::Config(format!("Failed to prepare updated skills query: {}", e))
+            })?;
 
         Self::query_skills_from_stmt(&mut stmt, [scan_timestamp])
     }
@@ -534,10 +604,13 @@ impl<'a> SkillsRepository<'a> {
             .prepare(
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
-                        frontmatter, created_at, mtime_ms, source_type, is_deleted
+                        frontmatter, created_at, mtime_ms, source_type, is_deleted,
+                        source_revision, source_remote_revision, source_update_status
                  FROM skills WHERE is_deleted = 1 ORDER BY last_seen_at DESC",
             )
-            .map_err(|e| AppError::Config(format!("Failed to prepare deleted skills query: {}", e)))?;
+            .map_err(|e| {
+                AppError::Config(format!("Failed to prepare deleted skills query: {}", e))
+            })?;
 
         Self::query_skills_from_stmt(&mut stmt, [])
     }
@@ -548,7 +621,8 @@ impl<'a> SkillsRepository<'a> {
             .prepare(
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
-                        frontmatter, created_at, mtime_ms, source_type, is_deleted
+                        frontmatter, created_at, mtime_ms, source_type, is_deleted,
+                        source_revision, source_remote_revision, source_update_status
                  FROM skills WHERE id = ?1",
             )
             .map_err(|e| AppError::Config(format!("Failed to prepare skill query: {}", e)))?;
@@ -564,6 +638,13 @@ impl<'a> SkillsRepository<'a> {
         let frontmatter_str: String = row.get(9)?;
         let frontmatter: HashMap<String, serde_json::Value> =
             serde_json::from_str(&frontmatter_str).unwrap_or_default();
+
+        let source_update_status_str: Option<String> = row.get(16)?;
+        let source_update_status = match source_update_status_str.as_deref() {
+            Some("update-available") => crate::core::models::SourceUpdateStatus::UpdateAvailable,
+            Some("unknown") => crate::core::models::SourceUpdateStatus::Unknown,
+            _ => crate::core::models::SourceUpdateStatus::UpToDate,
+        };
 
         Ok(Skill {
             id: row.get(0)?,
@@ -584,7 +665,10 @@ impl<'a> SkillsRepository<'a> {
                 _ => SkillSourceType::LocalFolder,
             },
             is_deleted: row.get::<_, i32>(13)? != 0,
-                content_hash: None,
+            content_hash: None,
+            source_revision: row.get(14)?,
+            source_remote_revision: row.get(15)?,
+            source_update_status,
         })
     }
 
@@ -834,9 +918,13 @@ impl<'a> ToolsRepository<'a> {
                 is_custom = excluded.is_custom,
                 updated_at = excluded.updated_at",
             params![
-                tool.id, tool.name, tool.path,
-                tool.enabled as i32, tool.is_custom as i32,
-                now, now,
+                tool.id,
+                tool.name,
+                tool.path,
+                tool.enabled as i32,
+                tool.is_custom as i32,
+                now,
+                now,
             ],
         )
         .map_err(|e| AppError::Config(format!("Failed to upsert tool: {}", e)))?;
@@ -978,7 +1066,9 @@ impl<'a> MarketplaceCacheRepository<'a> {
 
     fn evict_old_entries(conn: &Connection) -> Result<(), AppError> {
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM marketplace_cache", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM marketplace_cache", [], |row| {
+                row.get(0)
+            })
             .map_err(|e| AppError::Config(format!("Failed to count cache: {}", e)))?;
 
         if count as usize > MARKETPLACE_MAX_ENTRIES {
@@ -1021,7 +1111,9 @@ impl<'a> ProjectsRepository<'a> {
     pub fn get_all(&self) -> Result<Vec<crate::core::models::Project>, AppError> {
         let conn = self.db.connection();
         let mut stmt = conn
-            .prepare("SELECT id, name, root_path, created_at, updated_at FROM projects ORDER BY name")
+            .prepare(
+                "SELECT id, name, root_path, created_at, updated_at FROM projects ORDER BY name",
+            )
             .map_err(|e| AppError::Config(format!("Failed to prepare query: {}", e)))?;
 
         let projects = stmt
@@ -1137,6 +1229,9 @@ mod tests {
             source_type: SkillSourceType::LocalFolder,
             is_deleted: false,
             content_hash: None,
+            source_revision: None,
+            source_remote_revision: None,
+            source_update_status: Default::default(),
         };
 
         repo.upsert(&skill).unwrap();
@@ -1169,8 +1264,7 @@ mod tests {
         let db = create_test_database();
         let repo = AuditRepository::new(&db);
 
-        repo.log("install", "skill-1", None, true, None)
-            .unwrap();
+        repo.log("install", "skill-1", None, true, None).unwrap();
         repo.log(
             "delete",
             "skill-2",
@@ -1207,10 +1301,14 @@ mod tests {
             source_type: SkillSourceType::LocalFolder,
             is_deleted: false,
             content_hash: None,
+            source_revision: None,
+            source_remote_revision: None,
+            source_update_status: Default::default(),
         };
 
         repo.upsert(&skill).unwrap();
-        repo.update_content_hash("hash-test", "sha256abc123").unwrap();
+        repo.update_content_hash("hash-test", "sha256abc123")
+            .unwrap();
 
         let conn = db.connection();
         let hash: Option<String> = conn
@@ -1244,6 +1342,9 @@ mod tests {
             source_type: SkillSourceType::LocalFolder,
             is_deleted: false,
             content_hash: None,
+            source_revision: None,
+            source_remote_revision: None,
+            source_update_status: Default::default(),
         };
 
         let ts1 = "2024-01-01T00:00:00Z";
@@ -1285,6 +1386,9 @@ mod tests {
             source_type: SkillSourceType::LocalFolder,
             is_deleted: false,
             content_hash: None,
+            source_revision: None,
+            source_remote_revision: None,
+            source_update_status: Default::default(),
         };
 
         // Use upsert_with_scan so we control last_seen_at
@@ -1307,11 +1411,17 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(is_deleted, 1, "Skill should be soft-deleted (is_deleted=1), not hard-deleted");
+        assert_eq!(
+            is_deleted, 1,
+            "Skill should be soft-deleted (is_deleted=1), not hard-deleted"
+        );
 
         // Verify: get_installed() should NOT return it
         let installed = repo.get_installed().unwrap();
-        assert!(installed.is_empty(), "Soft-deleted skill should not appear as installed");
+        assert!(
+            installed.is_empty(),
+            "Soft-deleted skill should not appear as installed"
+        );
     }
 
     #[test]
@@ -1337,6 +1447,9 @@ mod tests {
             source_type: SkillSourceType::LocalFolder,
             is_deleted: false,
             content_hash: None,
+            source_revision: None,
+            source_remote_revision: None,
+            source_update_status: Default::default(),
         };
         skills_repo.upsert(&skill).unwrap();
 

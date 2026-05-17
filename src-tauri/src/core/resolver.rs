@@ -15,7 +15,10 @@ impl Resolver {
             if skill_rule.exclude.contains(&tool.id) {
                 return RuleDecision {
                     allowed: false,
-                    reason: Some(format!("Skill '{}' is excluded from tool '{}'", skill.name, tool.id)),
+                    reason: Some(format!(
+                        "Skill '{}' is excluded from tool '{}'",
+                        skill.name, tool.id
+                    )),
                     source: Some(RuleSource::Skill),
                 };
             }
@@ -23,13 +26,19 @@ impl Resolver {
                 if !skill_rule.only.contains(&tool.id) {
                     return RuleDecision {
                         allowed: false,
-                        reason: Some(format!("Skill '{}' is only allowed for tools: {:?}", skill.name, skill_rule.only)),
+                        reason: Some(format!(
+                            "Skill '{}' is only allowed for tools: {:?}",
+                            skill.name, skill_rule.only
+                        )),
                         source: Some(RuleSource::Skill),
                     };
                 }
                 return RuleDecision {
                     allowed: true,
-                    reason: Some(format!("Skill '{}' explicitly allows tool '{}'", skill.name, tool.id)),
+                    reason: Some(format!(
+                        "Skill '{}' explicitly allows tool '{}'",
+                        skill.name, tool.id
+                    )),
                     source: Some(RuleSource::Skill),
                 };
             }
@@ -39,14 +48,20 @@ impl Resolver {
             if group_rule.exclude.contains(&tool.id) {
                 return RuleDecision {
                     allowed: false,
-                    reason: Some(format!("Group '{}' is excluded from tool '{}'", skill.group, tool.id)),
+                    reason: Some(format!(
+                        "Group '{}' is excluded from tool '{}'",
+                        skill.group, tool.id
+                    )),
                     source: Some(RuleSource::Group),
                 };
             }
             if !group_rule.only.is_empty() && !group_rule.only.contains(&tool.id) {
                 return RuleDecision {
                     allowed: false,
-                    reason: Some(format!("Group '{}' is only allowed for tools: {:?}", skill.group, group_rule.only)),
+                    reason: Some(format!(
+                        "Group '{}' is only allowed for tools: {:?}",
+                        skill.group, group_rule.only
+                    )),
                     source: Some(RuleSource::Group),
                 };
             }
@@ -63,14 +78,21 @@ impl Resolver {
             if !tool_rule.allow.is_empty() && !tool_rule.allow.contains(&skill.name) {
                 return RuleDecision {
                     allowed: false,
-                    reason: Some(format!("Tool '{}' only allows skills: {:?}", tool.id, tool_rule.allow)),
+                    reason: Some(format!(
+                        "Tool '{}' only allows skills: {:?}",
+                        tool.id, tool_rule.allow
+                    )),
                     source: Some(RuleSource::Tool),
                 };
             }
-            if !tool_rule.allow_groups.is_empty() && !tool_rule.allow_groups.contains(&skill.group) {
+            if !tool_rule.allow_groups.is_empty() && !tool_rule.allow_groups.contains(&skill.group)
+            {
                 return RuleDecision {
                     allowed: false,
-                    reason: Some(format!("Tool '{}' only allows groups: {:?}", tool.id, tool_rule.allow_groups)),
+                    reason: Some(format!(
+                        "Tool '{}' only allows groups: {:?}",
+                        tool.id, tool_rule.allow_groups
+                    )),
                     source: Some(RuleSource::Tool),
                 };
             }
@@ -94,7 +116,11 @@ impl Resolver {
         self.check_skill_rules(skill, &tool).allowed
     }
 
-    pub fn get_skill_decisions(&self, skill: &Skill, tools: &[Tool]) -> HashMap<String, RuleDecision> {
+    pub fn get_skill_decisions(
+        &self,
+        skill: &Skill,
+        tools: &[Tool],
+    ) -> HashMap<String, RuleDecision> {
         let mut decisions = HashMap::new();
         for tool in tools {
             let decision = self.check_skill_rules(skill, tool);
@@ -111,10 +137,16 @@ impl Resolver {
                 reasons.push(format!("Tool '{}' blocks all skills", tool_id));
             }
             if !tool_rule.allow.is_empty() {
-                reasons.push(format!("Tool '{}' has allow list: {:?}", tool_id, tool_rule.allow));
+                reasons.push(format!(
+                    "Tool '{}' has allow list: {:?}",
+                    tool_id, tool_rule.allow
+                ));
             }
             if !tool_rule.allow_groups.is_empty() {
-                reasons.push(format!("Tool '{}' allows groups: {:?}", tool_id, tool_rule.allow_groups));
+                reasons.push(format!(
+                    "Tool '{}' allows groups: {:?}",
+                    tool_id, tool_rule.allow_groups
+                ));
             }
         }
 
@@ -126,10 +158,16 @@ impl Resolver {
 
         if let Some(group_rule) = self.rules.groups.get(group) {
             if !group_rule.only.is_empty() {
-                reasons.push(format!("Group '{}' only allows tools: {:?}", group, group_rule.only));
+                reasons.push(format!(
+                    "Group '{}' only allows tools: {:?}",
+                    group, group_rule.only
+                ));
             }
             if !group_rule.exclude.is_empty() {
-                reasons.push(format!("Group '{}' excludes tools: {:?}", group, group_rule.exclude));
+                reasons.push(format!(
+                    "Group '{}' excludes tools: {:?}",
+                    group, group_rule.exclude
+                ));
             }
         }
 
@@ -141,10 +179,16 @@ impl Resolver {
 
         if let Some(skill_rule) = self.rules.skills.get(skill_name) {
             if !skill_rule.only.is_empty() {
-                reasons.push(format!("Skill '{}' only allows tools: {:?}", skill_name, skill_rule.only));
+                reasons.push(format!(
+                    "Skill '{}' only allows tools: {:?}",
+                    skill_name, skill_rule.only
+                ));
             }
             if !skill_rule.exclude.is_empty() {
-                reasons.push(format!("Skill '{}' excludes tools: {:?}", skill_name, skill_rule.exclude));
+                reasons.push(format!(
+                    "Skill '{}' excludes tools: {:?}",
+                    skill_name, skill_rule.exclude
+                ));
             }
         }
 
@@ -182,6 +226,9 @@ mod tests {
             source_type: crate::core::models::SkillSourceType::LocalFolder,
             is_deleted: false,
             content_hash: None,
+            source_revision: None,
+            source_remote_revision: None,
+            source_update_status: Default::default(),
         }
     }
 

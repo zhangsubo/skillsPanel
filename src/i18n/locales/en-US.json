@@ -85,6 +85,14 @@
   "installSkill.nameHint": "If left empty, the system will auto-parse from SKILL.md or use the filename",
   "installSkill.installing": "Installing...",
   "installSkill.installBtn": "Install Skills",
+  "installSkill.installSelected": "Install Selected ({{count}})",
+  "installSkill.back": "Back",
+  "installSkill.cancel": "Cancel",
+  "installSkill.invalid": "Invalid",
+  "installSkill.unnamed": "Unnamed",
+  "installSkill.previewBtn": "Preview Repository",
+  "installSkill.previewing": "Previewing...",
+  "installSkill.previewResult": "Found {{count}} Skill(s)",
   "installSkill.localSuccess": "\"{{name}}\" installed successfully",
   "installSkill.gitUrlLabel": "Git Repository URL",
   "installSkill.gitFormats": "Supported formats",
@@ -137,5 +145,10 @@
   "tools.customTool": "Custom tool",
   "tools.systemTool": "System tool",
   "tools.noTools": "No tools found.",
-  "tools.noToolsHint": "Sync skills to discover available tools."
+  "tools.noToolsHint": "Sync skills to discover available tools.",
+  "settings.debugLogging": "Debug Logging",
+  "settings.debugLoggingDesc": "When enabled, all logs are written to a file on your Desktop for troubleshooting",
+  "settings.debugLoggingHint": "Log file: ~/Desktop/skills-panel-YYYYMMDD.txt",
+  "settings.debugLoggingOn": "On",
+  "settings.debugLoggingOff": "Off"
 }

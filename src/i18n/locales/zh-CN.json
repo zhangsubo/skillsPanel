@@ -85,6 +85,14 @@
   "installSkill.nameHint": "若不填写，系统将自动解析包内 SKILL.md 的内容或直接使用文件名",
   "installSkill.installing": "安装中...",
   "installSkill.installBtn": "安装技能",
+  "installSkill.installSelected": "安装选中 ({{count}})",
+  "installSkill.back": "返回",
+  "installSkill.cancel": "取消",
+  "installSkill.invalid": "无效",
+  "installSkill.unnamed": "未命名",
+  "installSkill.previewBtn": "预览仓库内容",
+  "installSkill.previewing": "正在预览...",
+  "installSkill.previewResult": "发现 {{count}} 个 Skill",
   "installSkill.localSuccess": "\"{{name}}\" 安装成功",
   "installSkill.gitUrlLabel": "Git 仓库地址",
   "installSkill.gitFormats": "支持格式",
@@ -137,5 +145,10 @@
   "tools.customTool": "自定义工具",
   "tools.systemTool": "系统工具",
   "tools.noTools": "未找到工具。",
-  "tools.noToolsHint": "同步技能以发现可用工具。"
+  "tools.noToolsHint": "同步技能以发现可用工具。",
+  "settings.debugLogging": "调试日志",
+  "settings.debugLoggingDesc": "开启后，所有日志将写入桌面文件，便于排查问题",
+  "settings.debugLoggingHint": "日志文件位置：~/Desktop/skills-panel-YYYYMMDD.txt",
+  "settings.debugLoggingOn": "已开启",
+  "settings.debugLoggingOff": "已关闭"
 }

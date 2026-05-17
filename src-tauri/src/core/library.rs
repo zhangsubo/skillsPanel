@@ -1,7 +1,7 @@
-use crate::core::error::AppError;
 use crate::core::config::AppConfig;
+use crate::core::error::AppError;
 use crate::core::fs_utils;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -12,7 +12,9 @@ pub struct SkillLibrary {
 impl SkillLibrary {
     pub fn new(config: &AppConfig) -> Result<Self, AppError> {
         fs::create_dir_all(&config.library_path)?;
-        Ok(Self { library_path: config.library_path.clone() })
+        Ok(Self {
+            library_path: config.library_path.clone(),
+        })
     }
 
     pub fn library_path(&self) -> &Path {
@@ -39,14 +41,20 @@ impl SkillLibrary {
         let dest = self.skill_path(name);
         if dest.exists() {
             return Err(AppError::Conflict(format!(
-                "Skill '{}' already exists in library at {}", name, dest.display()
+                "Skill '{}' already exists in library at {}",
+                name,
+                dest.display()
             )));
         }
         self.copy_skill_dir(source_path, &dest)?;
         Ok(dest)
     }
 
-    pub fn add_skill_with_overwrite(&self, source_path: &Path, name: &str) -> Result<PathBuf, AppError> {
+    pub fn add_skill_with_overwrite(
+        &self,
+        source_path: &Path,
+        name: &str,
+    ) -> Result<PathBuf, AppError> {
         let dest = self.skill_path(name);
         if dest.exists() {
             fs::remove_dir_all(&dest)?;
@@ -70,7 +78,10 @@ impl SkillLibrary {
             return Err(AppError::SkillNotFound(old_name.into()));
         }
         if new_path.exists() {
-            return Err(AppError::Conflict(format!("Skill '{}' already exists", new_name)));
+            return Err(AppError::Conflict(format!(
+                "Skill '{}' already exists",
+                new_name
+            )));
         }
         fs::rename(&old_path, &new_path)?;
         Ok(new_path)
@@ -85,7 +96,7 @@ impl SkillLibrary {
             let entry = entry?;
             if entry.file_type()?.is_dir() {
                 let skill_dir = entry.path();
-                if skill_dir.join("SKILL.md").exists() {
+                if fs_utils::is_valid_skill_dir(&skill_dir) {
                     if let Some(name) = entry.file_name().to_str() {
                         skills.push(name.to_string());
                     }
@@ -97,7 +108,7 @@ impl SkillLibrary {
     }
 
     pub fn skill_exists(&self, name: &str) -> bool {
-        self.skill_path(name).join("SKILL.md").exists()
+        fs_utils::is_valid_skill_dir(&self.skill_path(name))
     }
 
     fn copy_skill_dir(&self, src: &Path, dest: &Path) -> Result<(), AppError> {
@@ -109,17 +120,23 @@ impl SkillLibrary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::config::AppConfig;
     use std::fs;
     use tempfile::TempDir;
-    use crate::core::config::AppConfig;
 
     fn create_test_config(library_path: &Path) -> AppConfig {
         AppConfig {
             library_path: library_path.join("library"),
             tools: vec![],
             sources: vec![],
-            sync: crate::core::models::SyncConfig { mode: crate::core::models::SyncMode::Symlink },
-            install: crate::core::models::InstallConfig { allow_zip: true, allow_git: true, default_sync_targets: vec![] },
+            sync: crate::core::models::SyncConfig {
+                mode: crate::core::models::SyncMode::Symlink,
+            },
+            install: crate::core::models::InstallConfig {
+                allow_zip: true,
+                allow_git: true,
+                default_sync_targets: vec![],
+            },
             exclude_paths: vec![],
             rules: crate::core::models::RulesConfig::default(),
             deleted_skills: vec![],
@@ -148,7 +165,10 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path());
         let lib = SkillLibrary::new(&config).unwrap();
-        assert_eq!(lib.skill_path("foo"), temp.path().join("library").join("foo"));
+        assert_eq!(
+            lib.skill_path("foo"),
+            temp.path().join("library").join("foo")
+        );
     }
 
     #[test]

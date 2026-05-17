@@ -19,8 +19,9 @@ impl RepoLock {
         let file = File::create(&lock_path)
             .map_err(|e| AppError::Config(format!("Failed to create lock file: {}", e)))?;
 
-        file.lock_exclusive()
-            .map_err(|e| AppError::Config(format!("Failed to acquire lock ({description}): {e}")))?;
+        file.lock_exclusive().map_err(|e| {
+            AppError::Config(format!("Failed to acquire lock ({description}): {e}"))
+        })?;
 
         Ok(Self { _guard: file })
     }
@@ -29,7 +30,6 @@ impl RepoLock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[test]
     fn test_acquire_and_drop() {
