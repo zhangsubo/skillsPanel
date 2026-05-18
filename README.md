@@ -5,7 +5,9 @@
 Agent Skill Unified Management Tool — 统一管理 AI 编程工具的技能（Skills），支持本地、ZIP、Git 安装，技能同步，项目工作区管理。
 
 > 请注意，如果出现：**未打开“Skills Pane!”**Apple无法验证“Skills Panel”是否包含可能危害 Mac安全或泄漏隐私的恶意软件。
+>
 > ![](https://markdown.zhangsubo.cn/20260518112130934.png)
+>
 > 原因在于在macOS Ventura及以上版本中，系统安全性进一步加强，默认情况下不允许运行未验证或未签名的应用程序。因为软件本身是开源的，并未在线发布到苹果应用商店，这样的应用都会触发安全提醒。
 > 解决方法：在“系统设置 → 隐私与安全性”中点击“仍要打开” 这种方式打开即可。
 
