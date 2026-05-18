@@ -9,7 +9,9 @@ Agent Skill Unified Management Tool — 统一管理 AI 编程工具的技能（
 - **技能管理**：扫描本地技能目录，安装技能（本地文件夹/ZIP/Git），查看技能详情
 - **多工具同步**：将技能通过 Symlink  模式同步到 Cursor、Claude Code、OpenCode、Codex 等多个 AI 工具
 - **项目工作区**：扫描项目中的技能目录（`.claude/skills/`、`.cursor/skills/` 等），支持技能导入/导出中央仓库、同步健康状态检测
-- **Git 安装增强**：Tree URL 解析、多技能仓库检测、克隆缓存、进度推送、取消机制
+- **Git 安装增强**：Tree URL 解析、多技能仓库自动安装、克隆缓存、进度推送、取消机制
+- **双格式检测**：同时支持 `SKILL.md` 和 `skill.md` 标记文件
+- **调试日志**：设置中开启后，日志写入桌面文件便于排查问题
 - **安全加固**：AES-256-GCM 敏感配置加密、RepoLock 安装互斥锁、内容哈希去重
 - **配置统一**：数据库作为唯一配置源，JSON 文件仅作为备份/导出
 
@@ -64,6 +66,8 @@ npm run tauri build
 │   │   │   ├── resolver.rs       # 规则解析
 │   │   │   ├── project_scanner.rs # 项目工作区扫描
 │   │   │   ├── git_url_parser.rs # Git URL 解析
+│   │   │   ├── git_clone.rs       # Git 克隆（缓存/进度/取消）
+│   │   │   ├── git_update.rs     # Git 技能更新检测
 │   │   │   ├── install_cancel.rs # 取消令牌注册表
 │   │   │   ├── repo_lock.rs      # 安装互斥锁
 │   │   │   ├── crypto.rs         # AES-256-GCM 加密
