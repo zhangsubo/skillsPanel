@@ -387,12 +387,45 @@ impl SkillEngine {
 
         let mut results = Vec::new();
         let filtered_dirs: Vec<_> = if let Some(name) = name_filter {
+            // Match against frontmatter name AND directory name, since a skill
+            // at the repo root has file_name() == "repo" which never matches.
             skill_dirs.iter().filter(|d| {
-                d.file_name().and_then(|n| n.to_str()).map(|n| n == name).unwrap_or(false)
+                let dir_matches = d.file_name().and_then(|n| n.to_str()).map(|n| n == name).unwrap_or(false);
+                if dir_matches {
+                    return true;
+                }
+                // Try matching against the frontmatter name inside SKILL.md
+                if let Ok(content) = fs::read_to_string(d.join(fs_utils::SKILL_MARKER_CANONICAL))
+                    .or_else(|_| fs::read_to_string(d.join(fs_utils::SKILL_MARKER_LEGACY)))
+                {
+                    if let Some((fm, _)) = Self::parse_frontmatter(&content) {
+                        if let Some(frontmatter_name) = fm.get("name").and_then(|v| v.as_str()) {
+                            return frontmatter_name == name;
+                        }
+                    }
+                }
+                false
             }).cloned().collect()
         } else {
             skill_dirs.clone()
         };
+        if filtered_dirs.is_empty() && name_filter.is_some() {
+            let available: Vec<String> = skill_dirs.iter().filter_map(|d| {
+                let dir_name = d.file_name().and_then(|n| n.to_str()).map(String::from);
+                let fm_name = fs::read_to_string(d.join(fs_utils::SKILL_MARKER_CANONICAL))
+                    .or_else(|_| fs::read_to_string(d.join(fs_utils::SKILL_MARKER_LEGACY)))
+                    .ok()
+                    .and_then(|c| Self::parse_frontmatter(&c))
+                    .and_then(|(fm, _)| fm.get("name").and_then(|v| v.as_str()).map(String::from));
+                fm_name.or(dir_name)
+            }).collect();
+            return Err(AppError::InvalidSkill(format!(
+                "No skill matching '{}' found. Available: {}",
+                name_filter.unwrap(),
+                available.join(", ")
+            )));
+        }
+
         for skill_dir in &filtered_dirs {
             let source_type = SkillSourceType::Git;
             let mut metadata = Self::parse_skill_metadata(skill_dir, source_type)?;
