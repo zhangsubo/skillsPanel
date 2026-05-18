@@ -4,6 +4,12 @@
 
 Agent Skill Unified Management Tool — 统一管理 AI 编程工具的技能（Skills），支持本地、ZIP、Git 安装，技能同步，项目工作区管理。
 
+> 请注意，如果出现：**未打开“Skills Pane!”**Apple无法验证“Skills Panel”是否包含可能危害 Mac安全或泄漏隐私的恶意软件。
+> ![](https://markdown.zhangsubo.cn/20260518112130934.png)
+> 原因在于在macOS Ventura及以上版本中，系统安全性进一步加强，默认情况下不允许运行未验证或未签名的应用程序。因为软件本身是开源的，并未在线发布到苹果应用商店，这样的应用都会触发安全提醒。
+> 解决方法：在“系统设置 → 隐私与安全性”中点击“仍要打开” 这种方式打开即可。
+
+
 ## 功能
 
 - **技能管理**：扫描本地技能目录，安装技能（本地文件夹/ZIP/Git），查看技能详情
@@ -107,7 +113,7 @@ npm run tauri build
 - **[skills-manager](https://github.com/xingkongliang/skills-manager)** — 参考了这个项目的很多有意思的设计和想法，包括数据库设计、安装流程、场景系统和项目工作区模块
 - **[GitNexus](https://github.com/abhigyanpatwari/GitNexus)** — 代码分析工具，用于理解代码库结构和执行流程
 - **[Understand-Anything](https://understand-anything.com/)** — 代码分析工具，用于生成交互式知识图谱
-- **[xiaomi mimo Orbit 百万亿 Token 计划]( https://platform.xiaomimimo.com/docs/zh-CN/news/v2.5-open-sourced) **— 感谢提供的 Token 支持
+- **[xiaomi mimo Orbit 百万亿 Token 计划]( https://platform.xiaomimimo.com/docs/zh-CN/news/v2.5-open-sourced)** — 感谢提供的 Token 支持
 - **商汤科技** — 感谢提供的免费 Token Plan，使用了 deepseek-v4-flash 模型进行开发
 
 ## License
