@@ -1,6 +1,6 @@
+use dirs::home_dir;
 use std::fs;
 use std::path::{Path, PathBuf};
-use dirs::home_dir;
 
 pub struct PlatformFs;
 
@@ -9,7 +9,9 @@ impl PlatformFs {
     /// On Windows, also supports `%USERPROFILE%` style env vars.
     pub fn expand_tilde(path: &str) -> PathBuf {
         let expanded = Self::expand_env_impl(path);
-        if expanded.to_string_lossy().starts_with("~/") || expanded.to_string_lossy().as_ref() == "~" {
+        if expanded.to_string_lossy().starts_with("~/")
+            || expanded.to_string_lossy().as_ref() == "~"
+        {
             if let Some(home) = home_dir() {
                 let rest = expanded.to_string_lossy();
                 let rest = rest.strip_prefix('~').unwrap_or("");
@@ -93,9 +95,7 @@ impl PlatformFs {
     }
 
     pub fn is_directory(path: &Path) -> bool {
-        fs::metadata(path)
-            .map(|m| m.is_dir())
-            .unwrap_or(false)
+        fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false)
     }
 
     pub fn canonicalize_safe(path: &Path) -> Option<PathBuf> {

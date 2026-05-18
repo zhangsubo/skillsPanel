@@ -98,7 +98,11 @@ impl Linker {
         Self::link(skill_path, tool_dir, skill_name)
     }
 
-    pub fn check_status(skill_library_path: &Path, tool_dir: &Path, skill_name: &str) -> SkillToolStatus {
+    pub fn check_status(
+        skill_library_path: &Path,
+        tool_dir: &Path,
+        skill_name: &str,
+    ) -> SkillToolStatus {
         let target = tool_dir.join(skill_name);
 
         if !target.exists() && !target.is_symlink() {
@@ -199,7 +203,10 @@ mod tests {
         let link_path = Path::new("/home/user/.cursor/skills/my-skill");
         let link_dest = Path::new("../../.skills-panel/skills/my-skill");
         let resolved = Linker::resolve_link(link_path, link_dest);
-        assert_eq!(resolved, Path::new("/home/user/.cursor/skills/../../.skills-panel/skills/my-skill"));
+        assert_eq!(
+            resolved,
+            Path::new("/home/user/.cursor/skills/../../.skills-panel/skills/my-skill")
+        );
     }
 
     #[test]
@@ -241,7 +248,10 @@ mod tests {
         assert!(dest.join("file.txt").exists());
         assert_eq!(fs::read_to_string(dest.join("file.txt")).unwrap(), "hello");
         assert!(dest.join("subdir/nested.txt").exists());
-        assert_eq!(fs::read_to_string(dest.join("subdir/nested.txt")).unwrap(), "world");
+        assert_eq!(
+            fs::read_to_string(dest.join("subdir/nested.txt")).unwrap(),
+            "world"
+        );
     }
 
     #[test]

@@ -195,6 +195,25 @@ export default function Settings() {
     } catch {}
   }
 
+
+  const handleToggleDebugLogging = async () => {
+    if (!config) return
+    setSaving(true)
+    setError(null)
+    try {
+      const updated: AppConfigJson = {
+        ...config,
+        debug_logging: !config.debug_logging,
+      }
+      await updateConfig(updated)
+      setConfig(updated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex h-full flex-col gap-6 p-6">
@@ -345,6 +364,36 @@ export default function Settings() {
               {t('settings.openDir')}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">{t('settings.debugLogging')}</CardTitle>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.debugLoggingDesc')}</p>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={config?.debug_logging ?? false}
+                disabled={saving}
+                onClick={handleToggleDebugLogging}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${config?.debug_logging ? 'bg-primary' : 'bg-muted'}`}
+              >
+                <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ${config?.debug_logging ? 'translate-x-4' : 'translate-x-0'}`} />
+              </button>
+              <span className="text-sm">
+                {config?.debug_logging ? t('settings.debugLoggingOn') : t('settings.debugLoggingOff')}
+              </span>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {t('settings.debugLoggingHint')}
+          </p>
         </CardContent>
       </Card>
 
