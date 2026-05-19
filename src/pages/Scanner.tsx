@@ -814,8 +814,10 @@ function ScanLocalTab() {
                 {sws.skill.description || t('installSkill.noDescription')}
               </p>
               <p className="text-xs text-muted-foreground">
-                {t('installSkill.source')}: {sws.skill.library_path}
-                {sws.skill.original_source_path && (
+                {isInLibrary(sws)
+                  ? `${t('installSkill.source')}: ${sws.skill.library_path}`
+                  : `${t('installSkill.source')}: ${sws.skill.original_source_path || sws.skill.library_path}`}
+                {sws.skill.original_source_path && isInLibrary(sws) && !isLibrarySelfReference(sws) && (
                   <span className="ml-2">
                     {t('installSkill.source2')}: {sws.skill.original_source_path}
                   </span>
