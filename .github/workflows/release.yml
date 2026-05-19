@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.3.0)'
+        required: true
+        type: string
 
 jobs:
   verify-version:
@@ -13,7 +19,12 @@ jobs:
 
       - name: Verify tag matches app version
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG_VERSION="${{ github.event.inputs.tag }}"
+          else
+            TAG_VERSION="$GITHUB_REF_NAME"
+          fi
+          TAG_VERSION="${TAG_VERSION#v}"
           APP_VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
           if [ "$TAG_VERSION" != "$APP_VERSION" ]; then
             echo "Version mismatch: git tag is v$TAG_VERSION, but tauri.conf.json version is $APP_VERSION"
