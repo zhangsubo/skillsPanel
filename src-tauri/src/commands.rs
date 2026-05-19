@@ -1103,6 +1103,11 @@ pub fn export_skill_to_project(
     )
 }
 
+#[tauri::command]
+pub fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

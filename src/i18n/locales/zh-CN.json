@@ -150,5 +150,9 @@
   "settings.debugLoggingDesc": "开启后，所有日志将写入桌面文件，便于排查问题",
   "settings.debugLoggingHint": "日志文件位置：~/Desktop/skills-panel-YYYYMMDD.txt",
   "settings.debugLoggingOn": "已开启",
-  "settings.debugLoggingOff": "已关闭"
+  "settings.debugLoggingOff": "已关闭",
+  "updateDialog.title": "发现新版本",
+  "updateDialog.description": "当前版本 {{currentVersion}}，最新版本 {{latestVersion}}。是否前往下载？",
+  "updateDialog.cancel": "忽略更新",
+  "updateDialog.confirm": "前往下载"
 }

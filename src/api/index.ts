@@ -144,6 +144,7 @@ const MOCK_COMMANDS: Record<string, (args?: Record<string, unknown>) => unknown>
       error: 'Missing SKILL.md',
     },
   ],
+  get_app_version: () => '0.2.6',
   log_message: () => undefined,
   get_app_logs: () => [],
   install_local_skill: () => '/mock/library/file-organizer',

@@ -150,5 +150,9 @@
   "settings.debugLoggingDesc": "When enabled, all logs are written to a file on your Desktop for troubleshooting",
   "settings.debugLoggingHint": "Log file: ~/Desktop/skills-panel-YYYYMMDD.txt",
   "settings.debugLoggingOn": "On",
-  "settings.debugLoggingOff": "Off"
+  "settings.debugLoggingOff": "Off",
+  "updateDialog.title": "New Version Available",
+  "updateDialog.description": "Current: {{currentVersion}}, Latest: {{latestVersion}}. Go to download?",
+  "updateDialog.cancel": "Ignore Update",
+  "updateDialog.confirm": "Go to Download"
 }

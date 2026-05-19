@@ -146,6 +146,7 @@ pub fn run() {
             commands::unlink_tool_skill_in_db,
             commands::get_linked_tool_ids,
             commands::cancel_install,
+            commands::get_app_version,
             commands::check_skill_update,
             commands::update_skill,
             commands::create_project,
