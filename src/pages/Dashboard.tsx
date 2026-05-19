@@ -23,7 +23,7 @@ export default function Dashboard() {
 
   const handleScan = async () => {
     await scan()
-    navigate('/scanner')
+    navigate('/scanner?tab=scan')
   }
 
   if (hasError && !isLoading) {
@@ -100,7 +100,7 @@ export default function Dashboard() {
             <Package className="mr-2 h-4 w-4" />
             {t('dashboard.scanForSkills')}
           </Button>
-          <Button variant="outline" onClick={() => navigate('/tools')}>
+          <Button variant="outline" onClick={() => navigate('/settings')}>
             <Wrench className="mr-2 h-4 w-4" />
             {t('dashboard.manageAgents')}
           </Button>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   installLocalSkill,
@@ -862,6 +863,12 @@ function ScanLocalTab() {
 
 export default function InstallSkill() {
   const { t } = useTranslation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') || 'local'
+
+  const handleTabChange = (value: string) => {
+    setSearchParams({ tab: value })
+  }
 
   return (
     <div className="space-y-6">
@@ -874,7 +881,7 @@ export default function InstallSkill() {
         </p>
       </div>
 
-      <Tabs defaultValue="local" className="w-full">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
         <TabsList className="w-full">
           <TabsTrigger value="local" className="flex-1">
             {t('installSkill.tabLocal')}
