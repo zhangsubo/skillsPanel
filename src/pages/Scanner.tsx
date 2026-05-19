@@ -222,6 +222,7 @@ function GitInstallTab() {
   const [installing, setInstalling] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [candidates, setCandidates] = useState<InstallCandidate[] | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [progress, setProgress] = useState<{ stage: string; message: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -256,6 +257,7 @@ function GitInstallTab() {
     setError(null)
     setSuccess(null)
     setCandidates(null)
+    setSearchQuery('')
     setSelectedIds(new Set())
     try {
       const url = gitUrl.trim()
@@ -335,6 +337,12 @@ function GitInstallTab() {
   }
 
   // Show candidate selection if we have candidates
+  const filteredCandidates = candidates?.filter(c => {
+    if (!searchQuery.trim()) return true
+    const name = (c.detected_name || '').toLowerCase()
+    return name.includes(searchQuery.trim().toLowerCase())
+  }) ?? []
+
   if (candidates && candidates.length > 0) {
     return (
       <div className="space-y-6">
@@ -345,13 +353,19 @@ function GitInstallTab() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => { setCandidates(null); setSelectedIds(new Set()) }}
+            onClick={() => { setCandidates(null); setSearchQuery(''); setSelectedIds(new Set()) }}
           >
             {t('installSkill.back')}
           </Button>
         </div>
 
         <div className="space-y-2">
+          <Input
+            placeholder={t('installSkill.searchPlaceholder')}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full"
+          />
           <div className="flex items-center gap-2">
             <Checkbox
               checked={selectedIds.size === candidates.filter(c => c.valid).length && candidates.filter(c => c.valid).length > 0}
@@ -362,7 +376,7 @@ function GitInstallTab() {
             </span>
           </div>
 
-          {candidates.map(candidate => (
+          {filteredCandidates.map(candidate => (
             <div
               key={candidate.candidate_id}
               className="flex items-start gap-3 rounded-lg border p-3"

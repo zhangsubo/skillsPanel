@@ -52,6 +52,15 @@ pub fn run() {
                     "[Tool Check] Auto-disabled missing tools: {}",
                     disabled.join(", ")
                 );
+                // Sync updated tools back to DB so subsequent launches see the change
+                let tools_json = serde_json::to_string(&config.tools).map_err(|e| {
+                    crate::core::error::AppError::Config(format!(
+                        "Failed to serialize tools: {}",
+                        e
+                    ))
+                })?;
+                let db_repo = crate::core::database::ConfigRepository::new(&database);
+                db_repo.set("tools", &tools_json)?;
             }
             let library = SkillLibrary::new(&config)?;
             let audit_log = AuditLog::new(&config)?;
