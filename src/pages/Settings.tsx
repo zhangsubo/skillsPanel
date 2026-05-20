@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getVersion } from '@tauri-apps/api/app'
+import { checkForUpdate } from '@/api/version'
 import {
   getConfig,
   updateConfig,
@@ -57,6 +58,13 @@ export default function Settings() {
 
   const [editedRepoPath, setEditedRepoPath] = useState<string | null>(null)
   const [version, setVersion] = useState('')
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [updateInfo, setUpdateInfo] = useState<{
+    hasUpdate: boolean
+    currentVersion: string
+    latestVersion: string | null
+  } | null>(null)
+  const [updateError, setUpdateError] = useState<string | null>(null)
 
   const loadConfig = useCallback(async () => {
     setLoading(true)
@@ -211,6 +219,20 @@ export default function Settings() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true)
+    setUpdateError(null)
+    setUpdateInfo(null)
+    try {
+      const result = await checkForUpdate()
+      setUpdateInfo(result)
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCheckingUpdate(false)
     }
   }
 
@@ -397,6 +419,47 @@ export default function Settings() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">{t('settings.updateCheck')}</CardTitle>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.updateCheckDesc')}</p>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCheckUpdate}
+              disabled={checkingUpdate}
+            >
+              {checkingUpdate ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : null}
+              {t('settings.checkUpdate')}
+            </Button>
+            {updateInfo && (
+              <span className="text-sm">
+                {updateInfo.hasUpdate ? (
+                  <span className="text-green-600">
+                    {t('settings.updateAvailable', {
+                      current: updateInfo.currentVersion,
+                      latest: updateInfo.latestVersion,
+                    })}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">
+                    {t('settings.upToDate', { version: updateInfo.currentVersion })}
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
+          {updateError && (
+            <p className="mt-2 text-xs text-red-600">{updateError}</p>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="mt-auto border-t border-border pt-6 pb-2">
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           <img src={appIconUrl} alt="Skills Panel" className="h-5 w-5" />
@@ -441,15 +504,6 @@ export default function Settings() {
                   <FolderOpen className="h-4 w-4" />
                 </Button>
               </div>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm text-muted-foreground">
-                {t('settings.toolWorkspacePath')}
-              </label>
-              <Input
-                placeholder=".my-agent/skills"
-              />
-              <p className="text-xs text-muted-foreground">{t('settings.toolWorkspaceHint')}</p>
             </div>
           </div>
           <DialogFooter>
