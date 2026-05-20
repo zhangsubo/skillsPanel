@@ -573,6 +573,7 @@ function ScanLocalTab() {
   const [resultMsg, setResultMsg] = useState<string | null>(null)
   const [scanDiff, setScanDiff] = useState<ScanDiff | null>(null)
   const [libraryNames, setLibraryNames] = useState<Set<string>>(new Set())
+  const [searchQuery, setSearchQuery] = useState('')
 
   const handleScan = async () => {
     setScanning(true)
@@ -717,15 +718,29 @@ function ScanLocalTab() {
 
   const pendingSkills = skills?.filter((s) => !isAlreadyInstalled(s)) ?? []
   const doneSkills = skills?.filter((s) => isAlreadyInstalled(s)) ?? []
+
+  // 根据搜索查询过滤 skills
+  const filteredPendingSkills = searchQuery.trim()
+    ? pendingSkills.filter((s) =>
+        s.skill.name.toLowerCase().includes(searchQuery.trim().toLowerCase()) ||
+        (s.skill.description || '').toLowerCase().includes(searchQuery.trim().toLowerCase())
+      )
+    : pendingSkills
+  const filteredDoneSkills = searchQuery.trim()
+    ? doneSkills.filter((s) =>
+        s.skill.name.toLowerCase().includes(searchQuery.trim().toLowerCase()) ||
+        (s.skill.description || '').toLowerCase().includes(searchQuery.trim().toLowerCase())
+      )
+    : doneSkills
   const allPendingSelected =
-    pendingSkills.length > 0 &&
-    pendingSkills.every((s) => selectedIds.has(s.skill.id))
+    filteredPendingSkills.length > 0 &&
+    filteredPendingSkills.every((s) => selectedIds.has(s.skill.id))
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {pendingSkills.length > 0 && (
+          {filteredPendingSkills.length > 0 && (
             <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
               <Checkbox
                 checked={allPendingSelected}
@@ -736,7 +751,7 @@ function ScanLocalTab() {
           )}
           <span className="text-sm text-muted-foreground">
             {t('installSkill.scanSummary', {
-              count: pendingSkills.length,
+              count: filteredPendingSkills.length,
             })}
           </span>
         </div>
@@ -750,7 +765,7 @@ function ScanLocalTab() {
             <ScanLine className="mr-1 h-4 w-4" />
             {t('installSkill.rescan')}
           </Button>
-          {pendingSkills.length > 0 && (
+          {filteredPendingSkills.length > 0 && (
             <Button
               size="sm"
               onClick={handleImportSelected}
@@ -785,6 +800,17 @@ function ScanLocalTab() {
         </div>
       )}
 
+      {skills && skills.length > 0 && (
+        <div className="relative">
+          <Input
+            placeholder={t('installSkill.searchPlaceholder')}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full"
+          />
+        </div>
+      )}
+
       {error && (
         <div className="flex items-center gap-2 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">
           <AlertCircle className="h-4 w-4 shrink-0" />
@@ -810,7 +836,7 @@ function ScanLocalTab() {
       )}
 
       <div className="space-y-2">
-        {pendingSkills.map((sws) => (
+        {filteredPendingSkills.map((sws) => (
           <Card
             key={sws.skill.id}
             className="flex items-start gap-3 p-4"
@@ -849,7 +875,7 @@ function ScanLocalTab() {
           </Card>
         ))}
 
-        {doneSkills.map((sws) => (
+        {filteredDoneSkills.map((sws) => (
           <Card
             key={sws.skill.id}
             className="flex items-center gap-3 bg-muted/30 p-4"

@@ -8,6 +8,8 @@ Agent Skill Unified Management Tool — 统一管理 AI 编程工具的技能（
 >
 > ![](https://markdown.zhangsubo.cn/20260518112130934.png)
 >
+> 
+>
 > 原因在于在macOS Ventura及以上版本中，系统安全性进一步加强，默认情况下不允许运行未验证或未签名的应用程序。因为软件本身是开源的，并未在线发布到苹果应用商店，这样的应用都会触发安全提醒。
 > 解决方法：在“系统设置 → 隐私与安全性”中点击“仍要打开” 这种方式打开即可。
 
@@ -18,6 +20,7 @@ Agent Skill Unified Management Tool — 统一管理 AI 编程工具的技能（
 - **多工具同步**：将技能通过 Symlink  模式同步到 Cursor、Claude Code、OpenCode、Codex 等多个 AI 工具
 - **项目工作区**：扫描项目中的技能目录（`.claude/skills/`、`.cursor/skills/` 等），支持技能导入/导出中央仓库、同步健康状态检测
 - **Git 安装增强**：Tree URL 解析、多技能仓库自动安装、克隆缓存、进度推送、取消机制
+- **搜索过滤**：在扫描结果中支持按技能名称和描述进行搜索过滤
 - **双格式检测**：同时支持 `SKILL.md` 和 `skill.md` 标记文件
 - **调试日志**：设置中开启后，日志写入桌面文件便于排查问题
 - **安全加固**：AES-256-GCM 敏感配置加密、RepoLock 安装互斥锁、内容哈希去重
