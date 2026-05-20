@@ -47,7 +47,7 @@ impl GitUrlParser {
         let original_url = url.trim().to_string();
 
         // Try tree URL parsing first (before normalization strips tree info)
-        if let Some(tree_info) = Self::parse_tree_url(&original_url) {
+        if let Some(tree_info) = Self::parse_github_content_url(&original_url) {
             return ParsedGitSource {
                 original_url,
                 clone_url: tree_info.0,
@@ -131,7 +131,7 @@ impl GitUrlParser {
         None
     }
 
-    fn parse_tree_url(url: &str) -> Option<(String, String, Option<String>, Option<String>)> {
+    fn parse_github_content_url(url: &str) -> Option<(String, String, Option<String>, Option<String>)> {
         let github_prefix = "https://github.com/";
         if !url.starts_with(github_prefix) {
             return None;
@@ -146,7 +146,9 @@ impl GitUrlParser {
         if owner.is_empty() || repo.is_empty() {
             return None;
         }
-        if segments[2] != "tree" {
+        // Support both /tree/ and /blob/ URL formats
+        let url_type = segments[2];
+        if url_type != "tree" && url_type != "blob" {
             return None;
         }
         let tree_path = segments[3..].join("/");
@@ -255,6 +257,28 @@ mod tests {
         assert_eq!(parsed.clone_url, "https://github.com/user/repo");
         assert_eq!(parsed.branch, Some("main/tools/skill".to_string()));
         assert_eq!(parsed.tree_path, Some("main/tools/skill".to_string()));
+        assert!(parsed.subpath.is_none());
+    }
+
+    #[test]
+    fn test_parse_blob_url() {
+        // blob URLs should be treated the same as tree URLs
+        let parsed =
+            GitUrlParser::parse_git_source("https://github.com/user/repo/blob/main/path/to/skill");
+        assert_eq!(parsed.clone_url, "https://github.com/user/repo");
+        assert_eq!(parsed.branch, Some("main/path/to/skill".to_string()));
+        assert_eq!(parsed.tree_path, Some("main/path/to/skill".to_string()));
+        assert!(parsed.subpath.is_none());
+    }
+
+    #[test]
+    fn test_parse_blob_url_real_example() {
+        // Real-world blob URL like the user's case
+        let parsed =
+            GitUrlParser::parse_git_source("https://github.com/anthropics/skills/blob/main/skills/skill-creator/");
+        assert_eq!(parsed.clone_url, "https://github.com/anthropics/skills");
+        assert_eq!(parsed.branch, Some("main/skills/skill-creator".to_string()));
+        assert_eq!(parsed.tree_path, Some("main/skills/skill-creator".to_string()));
         assert!(parsed.subpath.is_none());
     }
 

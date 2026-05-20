@@ -505,15 +505,6 @@ export default function Settings() {
                 </Button>
               </div>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm text-muted-foreground">
-                {t('settings.toolWorkspacePath')}
-              </label>
-              <Input
-                placeholder=".my-agent/skills"
-              />
-              <p className="text-xs text-muted-foreground">{t('settings.toolWorkspaceHint')}</p>
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddTool(false)}>
