@@ -1,3 +1,9 @@
+## [0.4.1](https://github.com/zhangsubo/skillsPanel/compare/v0.4.0...v0.4.1) (2026-05-20)
+
+### 修复
+
+* 扫描结果增加搜索框，改进同名 skill 冲突错误信息 ([c8e6dbf](https://github.com/zhangsubo/skillsPanel/commit/c8e6dbf53d48b266fc5c9309695e9d4818b6c5ae))
+
 ## [0.4.0](https://github.com/zhangsubo/skillsPanel/compare/v0.3.1...v0.4.0) (2026-05-20)
 
 ### 功能
