@@ -236,7 +236,11 @@ impl SkillEngine {
         library: &SkillLibrary,
     ) -> Result<PathBuf, AppError> {
         if library.skill_exists(&metadata.name) {
-            return Err(AppError::Conflict("同名 skill 已存在".to_string()));
+            return Err(AppError::Conflict(format!(
+                "同名 skill 已存在: '{}' (路径: {})",
+                metadata.name,
+                library.skill_path(&metadata.name).display()
+            )));
         }
         library.add_skill(&metadata.skill_root, &metadata.name)
     }
