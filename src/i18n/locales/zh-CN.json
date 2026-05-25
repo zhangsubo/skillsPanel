@@ -158,5 +158,22 @@
   "updateDialog.title": "发现新版本",
   "updateDialog.description": "当前版本 {{currentVersion}}，最新版本 {{latestVersion}}。是否前往下载？",
   "updateDialog.cancel": "忽略更新",
-  "updateDialog.confirm": "前往下载"
+  "updateDialog.confirm": "前往下载",
+  "nav.projectWorkspace": "项目工作区",
+  "project.addProject": "添加项目",
+  "project.addProjectDesc": "添加一个本地项目，管理其中各 Agent 的 Skills。",
+  "project.namePlaceholder": "项目名称",
+  "project.pathPlaceholder": "项目根目录路径，例如 /Users/xxx/my-project",
+  "project.noProjects": "暂无项目，点击 + 添加",
+  "project.selectHint": "从左侧选择一个项目查看详情。",
+  "project.enabled": "已启用",
+  "project.description": "管理该仓库中各 Agent 的本地 Skills，并与 Skills 中心双向同步。",
+  "project.addSkill": "添加 Skill",
+  "project.searchPlaceholder": "搜索项目中的 Skills...",
+  "project.filter.all": "全部",
+  "project.filter.enabled": "已启用",
+  "project.filter.disabled": "已停用",
+  "project.scopeProject": "仅项目",
+  "project.syncEnabled": "同步状态：已启用",
+  "project.noSkills": "该项目中暂无 Skills。"
 }

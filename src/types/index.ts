@@ -157,3 +157,42 @@ export interface InstallProgress {
   stage: string;
   message: string;
 }
+
+// ── Project / Workspace Types ─────────────────────────────────────
+
+export type SyncHealthStatus = 'in_sync' | 'center_newer' | 'project_newer' | 'diverged' | 'project_only' | 'center_only';
+
+export interface Project {
+  id: string;
+  name: string;
+  root_path: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectSkillInfo {
+  name: string;
+  description: string;
+  relative_path: string;
+  agent: string;
+  enabled: boolean;
+  content_hash: string | null;
+  in_center: boolean;
+  center_skill_id: string | null;
+  sync_status: SyncHealthStatus;
+}
+
+export interface SyncHealthDto {
+  in_sync: number;
+  center_newer: number;
+  project_newer: number;
+  diverged: number;
+  project_only: number;
+  center_only: number;
+}
+
+export interface ProjectDto {
+  project: Project;
+  skills: ProjectSkillInfo[];
+  sync_health: SyncHealthDto;
+}

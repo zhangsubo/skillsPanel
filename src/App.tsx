@@ -6,6 +6,7 @@ import Library from "./pages/Library";
 import SkillDetail from "./pages/SkillDetail";
 import Scanner from "./pages/Scanner";
 import Settings from "./pages/Settings";
+import ProjectWorkspace from "./pages/ProjectWorkspace";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
             <Route path="/library/:skillName" element={<SkillDetail />} />
             <Route path="/scanner" element={<Scanner />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/projects/:projectId" element={<ProjectWorkspace />} />
           </Route>
         </Routes>
       </MemoryRouter>

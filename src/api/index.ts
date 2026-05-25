@@ -198,6 +198,25 @@ const MOCK_COMMANDS: Record<string, (args?: Record<string, unknown>) => unknown>
   get_app_logs_from_db: () => [],
   log_app_message: () => undefined,
   log_audit_entry: () => undefined,
+
+  // ── Project / Workspace Mocks ──────────────────────────────────
+  list_projects: () => [
+    { id: 'p1', name: 'skillsPanel', root_path: '/Users/demo/Code/skillsPanel', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    { id: 'p2', name: 'my-web-app', root_path: '/Users/demo/Code/my-web-app', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  ],
+  create_project: () => undefined,
+  delete_project: () => undefined,
+  scan_project: () => ({
+    project: { id: 'p1', name: 'skillsPanel', root_path: '/Users/demo/Code/skillsPanel', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    skills: [
+      { name: 'code-reviewer', description: '智能代码审查助手', relative_path: 'code-reviewer', agent: 'claude-code', enabled: true, content_hash: 'abc123', in_center: true, center_skill_id: 's1', sync_status: 'in_sync' },
+      { name: 'git-helper', description: 'Git 工作流自动化工具', relative_path: 'git-helper', agent: 'cursor', enabled: true, content_hash: 'def456', in_center: true, center_skill_id: 's2', sync_status: 'diverged' },
+      { name: 'project-only-skill', description: '仅在项目中存在的技能', relative_path: 'project-only-skill', agent: 'claude-code', enabled: false, content_hash: null, in_center: false, center_skill_id: null, sync_status: 'project_only' },
+    ],
+    sync_health: { in_sync: 1, center_newer: 0, project_newer: 0, diverged: 1, project_only: 1, center_only: 0 },
+  }),
+  import_project_skill: () => '/mock/library/imported-skill',
+  export_skill_to_project: () => undefined,
 };
 
 function logToBackend(level: string, message: string, source: string): void {

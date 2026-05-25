@@ -158,5 +158,22 @@
   "updateDialog.title": "New Version Available",
   "updateDialog.description": "Current: {{currentVersion}}, Latest: {{latestVersion}}. Go to download?",
   "updateDialog.cancel": "Ignore Update",
-  "updateDialog.confirm": "Go to Download"
+  "updateDialog.confirm": "Go to Download",
+  "nav.projectWorkspace": "Project Workspace",
+  "project.addProject": "Add Project",
+  "project.addProjectDesc": "Add a local project to manage its Agent Skills.",
+  "project.namePlaceholder": "Project name",
+  "project.pathPlaceholder": "Project root path, e.g. /Users/xxx/my-project",
+  "project.noProjects": "No projects yet, click + to add",
+  "project.selectHint": "Select a project from the sidebar to view details.",
+  "project.enabled": "enabled",
+  "project.description": "Manage local Skills for each Agent in this repo, and sync with Skills Center.",
+  "project.addSkill": "Add Skill",
+  "project.searchPlaceholder": "Search skills in this project...",
+  "project.filter.all": "All",
+  "project.filter.enabled": "Enabled",
+  "project.filter.disabled": "Disabled",
+  "project.scopeProject": "Project only",
+  "project.syncEnabled": "Sync status: Enabled",
+  "project.noSkills": "No skills in this project."
 }
