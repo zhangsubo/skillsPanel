@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getVersion } from '@tauri-apps/api/app'
 import { checkForUpdate } from '@/api/version'
+import UpdateDialog from '@/components/UpdateDialog'
 import {
   getConfig,
   updateConfig,
@@ -65,6 +66,7 @@ export default function Settings() {
     latestVersion: string | null
   } | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
+  const [showUpdateDialog, setShowUpdateDialog] = useState(false)
 
   const loadConfig = useCallback(async () => {
     setLoading(true)
@@ -226,9 +228,13 @@ export default function Settings() {
     setCheckingUpdate(true)
     setUpdateError(null)
     setUpdateInfo(null)
+    setShowUpdateDialog(false)
     try {
       const result = await checkForUpdate()
       setUpdateInfo(result)
+      if (result.hasUpdate && result.latestVersion) {
+        setShowUpdateDialog(true)
+      }
     } catch (err) {
       setUpdateError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -468,6 +474,15 @@ export default function Settings() {
         </div>
         <p className="mt-1 text-xs text-muted-foreground/60">@zhangsubo.cn</p>
       </div>
+
+      {updateInfo?.latestVersion && (
+        <UpdateDialog
+          open={showUpdateDialog}
+          onClose={() => setShowUpdateDialog(false)}
+          currentVersion={updateInfo.currentVersion}
+          latestVersion={updateInfo.latestVersion}
+        />
+      )}
 
       <Dialog open={showAddTool} onOpenChange={(open) => !open && setShowAddTool(false)}>
         <DialogContent>

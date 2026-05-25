@@ -16,6 +16,8 @@ interface UpdateDialogProps {
   latestVersion: string
 }
 
+const RELEASES_BASE_URL = 'https://github.com/zhangsubo/skillsPanel/releases'
+
 export default function UpdateDialog({
   open,
   onClose,
@@ -24,22 +26,39 @@ export default function UpdateDialog({
 }: UpdateDialogProps) {
   const { t } = useTranslation()
 
+  const downloadUrl = `${RELEASES_BASE_URL}/tag/${latestVersion}`
+
   const handleConfirm = async () => {
-    const url = 'https://github.com/zhangsubo/skillsPanel/releases'
     if (
       typeof window !== 'undefined' &&
       '__TAURI_INTERNALS__' in window
     ) {
       try {
         const { open: openShell } = await import('@tauri-apps/plugin-shell')
-        await openShell(url)
+        await openShell(downloadUrl)
       } catch {
-        window.open(url, '_blank')
+        window.open(downloadUrl, '_blank')
       }
     } else {
-      window.open(url, '_blank')
+      window.open(downloadUrl, '_blank')
     }
     onClose()
+  }
+
+  const handleOpenUrl = async () => {
+    if (
+      typeof window !== 'undefined' &&
+      '__TAURI_INTERNALS__' in window
+    ) {
+      try {
+        const { open: openShell } = await import('@tauri-apps/plugin-shell')
+        await openShell(downloadUrl)
+      } catch {
+        window.open(downloadUrl, '_blank')
+      }
+    } else {
+      window.open(downloadUrl, '_blank')
+    }
   }
 
   return (
@@ -47,11 +66,21 @@ export default function UpdateDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t('updateDialog.title')}</DialogTitle>
-          <DialogDescription>
-            {t('updateDialog.description', {
-              currentVersion,
-              latestVersion,
-            })}
+          <DialogDescription className="space-y-2">
+            <p>
+              {t('updateDialog.description', {
+                currentVersion,
+                latestVersion,
+              })}
+            </p>
+            <button
+              type="button"
+              onClick={handleOpenUrl}
+              className="break-all text-left text-xs text-primary underline hover:text-primary/80"
+              title={downloadUrl}
+            >
+              {downloadUrl}
+            </button>
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
