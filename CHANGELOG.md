@@ -1,3 +1,9 @@
+## [0.5.0](https://github.com/zhangsubo/skillsPanel/compare/v0.4.1...v0.5.0) (2026-05-25)
+
+### 功能
+
+* 增加项目工作区功能 ([7a9c8c7](https://github.com/zhangsubo/skillsPanel/commit/7a9c8c703245c40b1321bee229e27afae20cac95))
+
 ## [0.4.1](https://github.com/zhangsubo/skillsPanel/compare/v0.4.0...v0.4.1) (2026-05-20)
 
 ### 修复
