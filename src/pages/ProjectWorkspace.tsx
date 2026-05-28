@@ -1,14 +1,16 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Search, RefreshCw, LayoutGrid, List, CheckSquare, Package, Plus } from 'lucide-react'
+import { Search, RefreshCw, LayoutGrid, List, CheckSquare, Package, Plus, X, Check } from 'lucide-react'
 import { useProjects } from '@/hooks/use-projects'
+import { getInstalledSkillsFromDb } from '@/api/database'
+import { exportSkillToProject } from '@/api/projects'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { ProjectSkillInfo } from '@/types'
+import type { ProjectSkillInfo, Skill } from '@/types'
 
 type FilterMode = 'all' | 'enabled' | 'disabled'
 type ViewMode = 'grid' | 'list'
@@ -22,6 +24,7 @@ export default function ProjectWorkspace() {
   const [filterMode, setFilterMode] = useState<FilterMode>('all')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set())
+  const [showAddSkillDialog, setShowAddSkillDialog] = useState(false)
 
   const project = projects.find((p) => p.id === projectId)
 
@@ -109,7 +112,7 @@ export default function ProjectWorkspace() {
             {t('project.description')}
           </p>
         </div>
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="sm" onClick={() => setShowAddSkillDialog(true)}>
           <Plus className="mr-1 h-3.5 w-3.5" />
           {t('project.addSkill')}
         </Button>
@@ -210,6 +213,18 @@ export default function ProjectWorkspace() {
             />
           ))}
         </div>
+      )}
+
+      {showAddSkillDialog && projectId && (
+        <AddSkillToProjectDialog
+          projectId={projectId}
+          existingSkills={projectDetail?.skills.map((s) => s.name) ?? []}
+          onClose={() => setShowAddSkillDialog(false)}
+          onAdded={() => {
+            setShowAddSkillDialog(false)
+            handleRefresh()
+          }}
+        />
       )}
     </div>
   )
@@ -316,6 +331,171 @@ function ProjectSkillRow({ skill, selected, onSelect }: { skill: ProjectSkillInf
       <span className={`inline-flex h-5 items-center rounded-full px-1.5 text-[10px] font-medium ${getSyncStatusColor(skill.sync_status)}`}>
         {getSyncStatusLabel(skill.sync_status)}
       </span>
+    </div>
+  )
+}
+
+function AddSkillToProjectDialog({
+  projectId,
+  existingSkills,
+  onClose,
+  onAdded,
+}: {
+  projectId: string
+  existingSkills: string[]
+  onClose: () => void
+  onAdded: () => void
+}) {
+  const { t } = useTranslation()
+  const [skills, setSkills] = useState<Skill[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const dbSkills = await getInstalledSkillsFromDb()
+        if (!cancelled) setSkills(dbSkills)
+      } catch {
+        if (!cancelled) setError('Failed to load skills')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  const filtered = useMemo(() => {
+    const existing = new Set(existingSkills)
+    let list = skills.filter((s) => !existing.has(s.name))
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      list = list.filter(
+        (s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q),
+      )
+    }
+    return list
+  }, [skills, existingSkills, searchQuery])
+
+  const toggle = useCallback((name: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }, [])
+
+  const handleSubmit = async () => {
+    if (selected.size === 0) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      for (const name of selected) {
+        await exportSkillToProject(projectId, name, 'claude-code')
+      }
+      onAdded()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="flex h-[500px] w-[500px] flex-col rounded-lg bg-white p-6 shadow-xl dark:bg-gray-900">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-foreground">{t('project.addSkill')}</h3>
+          <button onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-muted">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t('project.addSkillDesc')}
+        </p>
+
+        <div className="relative mt-4">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder={t('project.searchPlaceholder')}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+
+        <div className="mt-3 flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-14 w-full" />
+              ))}
+            </div>
+          ) : error ? (
+            <p className="py-4 text-center text-sm text-red-600">{error}</p>
+          ) : filtered.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">
+              {t('project.noSkills')}
+            </p>
+          ) : (
+            <div className="space-y-1">
+              {filtered.map((skill) => (
+                <button
+                  key={skill.name}
+                  onClick={() => toggle(skill.name)}
+                  className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                    selected.has(skill.name)
+                      ? 'bg-primary/10 text-primary'
+                      : 'hover:bg-muted text-foreground'
+                  }`}
+                >
+                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded border">
+                    {selected.has(skill.name) && <Check className="h-3.5 w-3.5" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">{skill.name}</p>
+                    {skill.description && (
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {skill.description}
+                      </p>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {error && !loading && (
+          <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>
+        )}
+
+        <div className="mt-4 flex items-center justify-between border-t pt-4">
+          <span className="text-xs text-muted-foreground">
+            {selected.size} {t('project.selected')}
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={onClose}
+              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"
+            >
+              {t('library.cancel')}
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={submitting || selected.size === 0}
+              className="rounded-md bg-gray-900 px-3 py-1.5 text-sm text-white hover:bg-gray-800 disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
+            >
+              {submitting ? '...' : t('project.addProject')}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

@@ -128,15 +128,17 @@ function AddProjectDialog({ onClose, onAdded }: { onClose: () => void; onAdded: 
   const [name, setName] = useState("");
   const [rootPath, setRootPath] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     if (!name.trim() || !rootPath.trim()) return;
     setSubmitting(true);
+    setError(null);
     try {
       await addProject(name.trim(), rootPath.trim());
       onAdded();
-    } catch {
-      // Error handled by hook
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
@@ -167,6 +169,9 @@ function AddProjectDialog({ onClose, onAdded }: { onClose: () => void; onAdded: 
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
           />
         </div>
+        {error && (
+          <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>
+        )}
         <div className="mt-5 flex justify-end gap-2">
           <button
             onClick={onClose}

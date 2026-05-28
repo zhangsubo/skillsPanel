@@ -169,6 +169,8 @@
   "project.enabled": "enabled",
   "project.description": "Manage local Skills for each Agent in this repo, and sync with Skills Center.",
   "project.addSkill": "Add Skill",
+  "project.addSkillDesc": "Select Skills from the central library to export to this project.",
+  "project.selected": "selected",
   "project.searchPlaceholder": "Search skills in this project...",
   "project.filter.all": "All",
   "project.filter.enabled": "Enabled",
