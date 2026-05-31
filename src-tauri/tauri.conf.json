@@ -40,5 +40,13 @@
         "installMode": "currentUser"
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/zhangsubo/skillsPanel/releases/latest/download/latest.json"
+      ],
+      "pubkey": ""
+    }
   }
 }

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -8,6 +9,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { useTranslation } from 'react-i18next'
+import { downloadAndInstallUpdate } from '@/api/updater'
 
 interface UpdateDialogProps {
   open: boolean
@@ -16,8 +18,6 @@ interface UpdateDialogProps {
   latestVersion: string
 }
 
-const RELEASES_BASE_URL = 'https://github.com/zhangsubo/skillsPanel/releases'
-
 export default function UpdateDialog({
   open,
   onClose,
@@ -25,39 +25,20 @@ export default function UpdateDialog({
   latestVersion,
 }: UpdateDialogProps) {
   const { t } = useTranslation()
+  const [downloading, setDownloading] = useState(false)
+  const [progress, setProgress] = useState(0)
 
-  const downloadUrl = `${RELEASES_BASE_URL}/tag/${latestVersion}`
+  const handleDownload = async () => {
+    setDownloading(true)
+    setProgress(0)
 
-  const handleConfirm = async () => {
-    if (
-      typeof window !== 'undefined' &&
-      '__TAURI_INTERNALS__' in window
-    ) {
-      try {
-        const { open: openShell } = await import('@tauri-apps/plugin-shell')
-        await openShell(downloadUrl)
-      } catch {
-        window.open(downloadUrl, '_blank')
-      }
-    } else {
-      window.open(downloadUrl, '_blank')
-    }
-    onClose()
-  }
+    const success = await downloadAndInstallUpdate((p) => {
+      setProgress(Math.round(p.percent))
+    })
 
-  const handleOpenUrl = async () => {
-    if (
-      typeof window !== 'undefined' &&
-      '__TAURI_INTERNALS__' in window
-    ) {
-      try {
-        const { open: openShell } = await import('@tauri-apps/plugin-shell')
-        await openShell(downloadUrl)
-      } catch {
-        window.open(downloadUrl, '_blank')
-      }
-    } else {
-      window.open(downloadUrl, '_blank')
+    if (!success) {
+      setDownloading(false)
+      setProgress(0)
     }
   }
 
@@ -73,22 +54,29 @@ export default function UpdateDialog({
                 latestVersion,
               })}
             </p>
-            <button
-              type="button"
-              onClick={handleOpenUrl}
-              className="break-all text-left text-xs text-primary underline hover:text-primary/80"
-              title={downloadUrl}
-            >
-              {downloadUrl}
-            </button>
+            {downloading && (
+              <div className="space-y-2">
+                <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+                  <div
+                    className="h-full bg-primary transition-all duration-300"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {t('updateDialog.downloading', { progress })}
+                </p>
+              </div>
+            )}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={onClose} disabled={downloading}>
             {t('updateDialog.cancel')}
           </Button>
-          <Button onClick={handleConfirm}>
-            {t('updateDialog.confirm')}
+          <Button onClick={handleDownload} disabled={downloading}>
+            {downloading
+              ? t('updateDialog.installing')
+              : t('updateDialog.updateNow')}
           </Button>
         </DialogFooter>
       </DialogContent>
