@@ -398,7 +398,7 @@ pub fn link_skill(
     let database = state.database.lock().unwrap();
     let tool = find_tool(&config, &tool_id)?;
     let skill_path = library.skill_path(&skill_name);
-    crate::core::linker::Linker::link(&skill_path, std::path::Path::new(&tool.path), &skill_name)?;
+    crate::core::linker::Linker::link(&skill_path, &tool.expanded_path(), &skill_name)?;
 
     let skill_db_repo = crate::core::database::SkillsRepository::new(&database);
     if let Ok(Some(skill_id)) = skill_db_repo.get_skill_id_by_name(&skill_name) {
@@ -419,7 +419,7 @@ pub fn unlink_skill(
     let config = state.config.lock().unwrap();
     let database = state.database.lock().unwrap();
     let tool = find_tool(&config, &tool_id)?;
-    crate::core::linker::Linker::unlink(std::path::Path::new(&tool.path), &skill_name)?;
+    crate::core::linker::Linker::unlink(&tool.expanded_path(), &skill_name)?;
 
     let skill_db_repo = crate::core::database::SkillsRepository::new(&database);
     if let Ok(Some(skill_id)) = skill_db_repo.get_skill_id_by_name(&skill_name) {
@@ -443,7 +443,7 @@ pub fn fix_skill_link(
     let skill_path = library.skill_path(&skill_name);
     crate::core::linker::Linker::fix_link(
         &skill_path,
-        std::path::Path::new(&tool.path),
+        &tool.expanded_path(),
         &skill_name,
     )
 }
@@ -501,7 +501,7 @@ pub fn batch_link_skills(
         if skill_path.exists() {
             if let Ok(_) = crate::core::linker::Linker::link(
                 &skill_path,
-                std::path::Path::new(&tool.path),
+                &tool.expanded_path(),
                 &skill_name,
             ) {
                 count += 1;
@@ -523,7 +523,7 @@ pub fn batch_unlink_skills(
     let mut count = 0;
     for skill_name in skill_names {
         if let Ok(_) =
-            crate::core::linker::Linker::unlink(std::path::Path::new(&tool.path), &skill_name)
+            crate::core::linker::Linker::unlink(&tool.expanded_path(), &skill_name)
         {
             count += 1;
         }
@@ -597,7 +597,7 @@ pub fn batch_delete_skills(
     let mut count = 0;
     for name in &skill_names {
         for tool in &config.tools {
-            let _ = crate::core::linker::Linker::unlink(std::path::Path::new(&tool.path), name);
+            let _ = crate::core::linker::Linker::unlink(&tool.expanded_path(), name);
         }
         if library.remove_skill(name).is_ok() {
             let _ = db_repo.delete_by_name(name);
@@ -630,7 +630,7 @@ pub fn sync_skills(
             if resolver.is_skill_allowed(&create_minimal_skill(&name, &skill_path), &tool.id) {
                 if let Ok(_) = crate::core::linker::Linker::link(
                     &skill_path,
-                    std::path::Path::new(&tool.path),
+                    &tool.expanded_path(),
                     &name,
                 ) {
                     count += 1;
@@ -647,7 +647,7 @@ pub fn clean_stale_links(state: State<'_, SharedState>) -> Result<usize, AppErro
     let config = state.config.lock().unwrap();
     let mut total = 0;
     for tool in &config.tools {
-        let cleaned = crate::core::linker::Linker::clean_stale(std::path::Path::new(&tool.path))?;
+        let cleaned = crate::core::linker::Linker::clean_stale(&tool.expanded_path())?;
         total += cleaned.len();
     }
     Ok(total)
@@ -665,7 +665,7 @@ pub fn delete_skill(
     let database = state.database.lock().unwrap();
 
     for tool in &config.tools {
-        let _ = crate::core::linker::Linker::unlink(std::path::Path::new(&tool.path), &skill_name);
+        let _ = crate::core::linker::Linker::unlink(&tool.expanded_path(), &skill_name);
     }
 
     library.remove_skill(&skill_name)?;
@@ -1138,6 +1138,7 @@ mod tests {
             exclude_paths: vec![],
             rules: crate::core::models::RulesConfig::default(),
             deleted_skills: vec![],
+            debug_logging: false,
         }
     }
 

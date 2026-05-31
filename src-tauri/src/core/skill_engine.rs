@@ -753,6 +753,7 @@ mod tests {
             exclude_paths: vec![],
             rules: crate::core::models::RulesConfig::default(),
             deleted_skills: vec![],
+            debug_logging: false,
         };
         let library = SkillLibrary::new(&config).unwrap();
 
@@ -804,6 +805,7 @@ mod tests {
             exclude_paths: vec![],
             rules: crate::core::models::RulesConfig::default(),
             deleted_skills: vec![],
+            debug_logging: false,
         };
         let library = SkillLibrary::new(&config).unwrap();
         let db = Database::new(&temp.path().join("test.db")).unwrap();

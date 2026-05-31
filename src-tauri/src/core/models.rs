@@ -58,6 +58,13 @@ pub struct Tool {
     pub is_custom: bool,
 }
 
+impl Tool {
+    /// Returns the tool directory path with `~` expanded to the home directory.
+    pub fn expanded_path(&self) -> std::path::PathBuf {
+        crate::core::fs_utils::expand_tilde(&self.path)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallCandidate {
     pub candidate_id: String,

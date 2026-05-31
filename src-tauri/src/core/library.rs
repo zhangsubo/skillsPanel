@@ -140,6 +140,7 @@ mod tests {
             exclude_paths: vec![],
             rules: crate::core::models::RulesConfig::default(),
             deleted_skills: vec![],
+            debug_logging: false,
         }
     }
 
