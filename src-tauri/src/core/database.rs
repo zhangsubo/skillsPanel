@@ -1008,6 +1008,23 @@ impl<'a> LinksRepository<'a> {
 
         Ok(tool_ids)
     }
+
+    /// Returns `true` when an `active` link between the given tool and skill
+    /// exists. Used by `link_skill` to detect a DB/FS mismatch (DB says linked
+    /// but the symlink is missing on disk) and trigger a self-heal rebuild.
+    pub fn is_active(&self, tool_id: &str, skill_id: &str) -> Result<bool, AppError> {
+        let conn = self.db.connection();
+        conn.query_row(
+            "SELECT 1 FROM tool_skill_links
+             WHERE tool_id = ?1 AND skill_id = ?2 AND status = 'active'
+             LIMIT 1",
+            params![tool_id, skill_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(|e| AppError::Config(format!("Failed to check active link: {}", e)))
+        .map(|opt| opt.is_some())
+    }
 }
 
 // ── Marketplace Cache Repository ─────────────────────────────────────
@@ -1483,5 +1500,59 @@ mod tests {
             )
             .unwrap();
         assert_eq!(link_count, 0, "tool_skill_links should be cascade-deleted");
+    }
+
+    #[test]
+    fn test_links_repository_is_active() {
+        let db = create_test_database();
+        let tools_repo = ToolsRepository::new(&db);
+        let skills_repo = SkillsRepository::new(&db);
+        let links_repo = LinksRepository::new(&db);
+
+        let tool = Tool {
+            id: "tool-x".to_string(),
+            name: "Tool X".to_string(),
+            path: "/x".to_string(),
+            enabled: true,
+            is_custom: false,
+        };
+        tools_repo.upsert(&tool).unwrap();
+
+        let skill = Skill {
+            id: "skill-y".to_string(),
+            name: "skill-y".to_string(),
+            path_hash: "h".to_string(),
+            library_path: "/y".to_string(),
+            original_source_path: None,
+            original_git_url: None,
+            original_git_subpath: None,
+            group: "default".to_string(),
+            description: "".to_string(),
+            frontmatter: HashMap::new(),
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            mtime_ms: 0,
+            source_type: SkillSourceType::LocalFolder,
+            is_deleted: false,
+            content_hash: None,
+            source_revision: None,
+            source_remote_revision: None,
+            source_update_status: Default::default(),
+        };
+        skills_repo.upsert(&skill).unwrap();
+
+        // No link yet — should report inactive.
+        assert!(!links_repo.is_active("tool-x", "skill-y").unwrap());
+
+        // After link(): active.
+        links_repo.link("tool-x", "skill-y").unwrap();
+        assert!(links_repo.is_active("tool-x", "skill-y").unwrap());
+
+        // After unlink(): inactive again.
+        links_repo.unlink("tool-x", "skill-y").unwrap();
+        assert!(!links_repo.is_active("tool-x", "skill-y").unwrap());
+
+        // A different tool_id should not see the link as active.
+        links_repo.link("tool-x", "skill-y").unwrap();
+        assert!(!links_repo.is_active("tool-other", "skill-y").unwrap());
     }
 }

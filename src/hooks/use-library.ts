@@ -78,15 +78,21 @@ export function useLibrary() {
 
   const handleLinkSkill = useCallback(async (skillName: string, toolId: string) => {
     await linkSkill(skillName, toolId)
-  }, [])
+    await scan()
+    await refresh()
+  }, [scan, refresh])
 
   const handleUnlinkSkill = useCallback(async (skillName: string, toolId: string) => {
     await unlinkSkill(skillName, toolId)
-  }, [])
+    await scan()
+    await refresh()
+  }, [scan, refresh])
 
   const handleDeleteSkill = useCallback(async (skillName: string) => {
     await deleteSkill(skillName)
-  }, [])
+    await scan()
+    await refresh()
+  }, [scan, refresh])
 
   useEffect(() => {
     refresh()

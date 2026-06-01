@@ -64,10 +64,15 @@ impl Scanner {
                 if !tool.enabled {
                     continue;
                 }
-                let tool_dir = std::path::Path::new(&tool.path);
+                // Use `expanded_path()` so that tool paths containing `~` resolve
+                // to the real home directory. Going through `Path::new(&tool.path)`
+                // would leave the literal `~/...` string in place, causing
+                // `check_status` to look at a non-existent path and wrongly
+                // report `Missing` for an actually-linked skill.
+                let tool_dir = tool.expanded_path();
                 let status = crate::core::linker::Linker::check_status(
                     skill_path,
-                    tool_dir,
+                    &tool_dir,
                     &skill_with_status.skill.name,
                 );
                 skill_with_status
@@ -470,5 +475,87 @@ mod tests {
     fn test_preview_local_install_nonexistent() {
         let result = Scanner::preview_local_install(Path::new("/nonexistent/path"));
         assert!(result.is_err());
+    }
+
+    /// Regression: when `tool.path` is an absolute path (i.e. already expanded),
+    /// `scan_sources` must report `Linked` instead of `Missing`. Before the
+    /// `tool.expanded_path()` fix, the literal `tool.path` was used to build
+    /// `tool_dir`, which silently dropped the resolved path.
+    #[test]
+    fn scan_sources_reports_linked_for_expanded_tool_path() {
+        use crate::core::config::AppConfig;
+
+        let temp = TempDir::new().unwrap();
+        let library_root = temp.path().join("library");
+        let tool_dir = temp.path().join("tools").join("opencode").join("skills");
+        fs::create_dir_all(&library_root).unwrap();
+        fs::create_dir_all(&tool_dir).unwrap();
+
+        // Create a real skill in the library.
+        let skill_name = "alpha";
+        let skill_lib_path = library_root.join(skill_name);
+        fs::create_dir(&skill_lib_path).unwrap();
+        fs::write(
+            skill_lib_path.join("SKILL.md"),
+            "---\nname: alpha\ndescription: test\n---\n# body\n",
+        )
+        .unwrap();
+
+        // Pre-create the symlink (simulating "already linked" state).
+        // On macOS, `tempdir` lives under `/var/folders/...` while its
+        // canonical form is `/private/var/folders/...`. The production
+        // `check_status` compares `read_link` against
+        // `Path::canonicalize(skill_path)`, so we must use the canonical
+        // path as the symlink target to keep both sides in agreement.
+        let canonical_skill = fs::canonicalize(&skill_lib_path).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&canonical_skill, tool_dir.join(skill_name)).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&canonical_skill, tool_dir.join(skill_name)).unwrap();
+
+        // Tool path is the resolved absolute path (what `expanded_path()`
+        // would return for `~/.opencode/skills` on a real system). The
+        // scanner must look at this directory, not the raw `tool.path`
+        // (which is identical here, but the test guards against future
+        // regressions that pass the raw path to `check_status`).
+        let config = AppConfig {
+            library_path: library_root,
+            tools: vec![Tool {
+                id: "opencode".into(),
+                name: "OpenCode".into(),
+                path: tool_dir.to_string_lossy().into_owned(),
+                enabled: true,
+                is_custom: false,
+            }],
+            sources: vec![],
+            sync: SyncConfig {
+                mode: SyncMode::Symlink,
+            },
+            install: InstallConfig {
+                allow_zip: true,
+                allow_git: true,
+                default_sync_targets: vec![],
+            },
+            exclude_paths: vec![],
+            rules: RulesConfig {
+                tools: std::collections::HashMap::new(),
+                groups: std::collections::HashMap::new(),
+                skills: std::collections::HashMap::new(),
+            },
+            deleted_skills: vec![],
+            debug_logging: false,
+        };
+
+        let library = SkillLibrary::new(&config).unwrap();
+        let skills = Scanner::scan_sources(&config, &library).unwrap();
+
+        let alpha = skills
+            .iter()
+            .find(|s| s.skill.name == skill_name)
+            .expect("skill should be discovered");
+        match alpha.tool_statuses.get("opencode") {
+            Some(SkillToolStatus::Linked) => {}
+            other => panic!("expected Linked, got {:?}", other),
+        }
     }
 }

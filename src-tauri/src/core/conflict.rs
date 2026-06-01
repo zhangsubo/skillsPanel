@@ -45,8 +45,11 @@ impl ConflictDetector {
             if !tool.enabled {
                 continue;
             }
-            let tool_dir = Path::new(&tool.path);
-            let status = Linker::check_status(&skill_path, tool_dir, &skill.name);
+            // Resolve `~` so a tool path like `~/.opencode/skills` matches the
+            // symlink that was actually created by `Linker::link` (which uses
+            // `expanded_path()` on the write side).
+            let tool_dir = tool.expanded_path();
+            let status = Linker::check_status(&skill_path, &tool_dir, &skill.name);
             statuses.insert(tool.id.clone(), status);
         }
 
@@ -66,8 +69,9 @@ impl ConflictDetector {
                 if !tool.enabled {
                     continue;
                 }
-                let tool_dir = Path::new(&tool.path);
-                if let Some(msg) = Self::check_directory_conflict(tool_dir, &skill.skill.name) {
+                // Match the write-side behavior: resolve `~` via expanded_path.
+                let tool_dir = tool.expanded_path();
+                if let Some(msg) = Self::check_directory_conflict(&tool_dir, &skill.skill.name) {
                     conflicts
                         .entry(skill.skill.name.clone())
                         .or_default()

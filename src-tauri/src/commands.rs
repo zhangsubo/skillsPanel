@@ -397,11 +397,49 @@ pub fn link_skill(
     let config = state.config.lock().unwrap();
     let database = state.database.lock().unwrap();
     let tool = find_tool(&config, &tool_id)?;
+    let tool_dir = tool.expanded_path();
     let skill_path = library.skill_path(&skill_name);
-    crate::core::linker::Linker::link(&skill_path, &tool.expanded_path(), &skill_name)?;
 
+    // Resolve the skill id once so the DB/FS branches below can share it.
     let skill_db_repo = crate::core::database::SkillsRepository::new(&database);
-    if let Ok(Some(skill_id)) = skill_db_repo.get_skill_id_by_name(&skill_name) {
+    let skill_id_opt = skill_db_repo
+        .get_skill_id_by_name(&skill_name)
+        .ok()
+        .flatten();
+
+    // Self-heal: if the DB already marks this (tool, skill) as active but
+    // the symlink on disk is gone (e.g. removed externally by the tool's
+    // own startup), recreate it before going through the normal path. This
+    // is the common case that previously returned `OK` while the UI still
+    // saw the skill as unlinked (because the scanner later reported
+    // `Missing` for the same key — see scanner.rs path resolution fix).
+    if let Some(ref skill_id) = skill_id_opt {
+        let links_repo = crate::core::database::LinksRepository::new(&database);
+        if links_repo.is_active(&tool_id, skill_id)? {
+            let target = tool_dir.join(&skill_name);
+            let symlink_present = target
+                .symlink_metadata()
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false);
+            if !symlink_present {
+                crate::core::linker::Linker::fix_link(&skill_path, &tool_dir, &skill_name)?;
+                let final_status =
+                    crate::core::linker::Linker::check_status(&skill_path, &tool_dir, &skill_name);
+                if !matches!(final_status, SkillToolStatus::Linked) {
+                    return Err(AppError::Link(format!(
+                        "self-heal failed: symlink at '{}' is not linked to '{}'",
+                        target.display(),
+                        skill_path.display()
+                    )));
+                }
+                return Ok(());
+            }
+        }
+    }
+
+    crate::core::linker::Linker::link(&skill_path, &tool_dir, &skill_name)?;
+
+    if let Some(skill_id) = skill_id_opt {
         let links_repo = crate::core::database::LinksRepository::new(&database);
         let _ = links_repo.link(&tool_id, &skill_id);
     }
@@ -441,11 +479,7 @@ pub fn fix_skill_link(
     let config = state.config.lock().unwrap();
     let tool = find_tool(&config, &tool_id)?;
     let skill_path = library.skill_path(&skill_name);
-    crate::core::linker::Linker::fix_link(
-        &skill_path,
-        &tool.expanded_path(),
-        &skill_name,
-    )
+    crate::core::linker::Linker::fix_link(&skill_path, &tool.expanded_path(), &skill_name)
 }
 
 #[tauri::command]
@@ -499,11 +533,9 @@ pub fn batch_link_skills(
     for skill_name in skill_names {
         let skill_path = library.skill_path(&skill_name);
         if skill_path.exists() {
-            if let Ok(_) = crate::core::linker::Linker::link(
-                &skill_path,
-                &tool.expanded_path(),
-                &skill_name,
-            ) {
+            if let Ok(_) =
+                crate::core::linker::Linker::link(&skill_path, &tool.expanded_path(), &skill_name)
+            {
                 count += 1;
             }
         }
@@ -522,9 +554,7 @@ pub fn batch_unlink_skills(
     let tool = find_tool(&config, &tool_id)?;
     let mut count = 0;
     for skill_name in skill_names {
-        if let Ok(_) =
-            crate::core::linker::Linker::unlink(&tool.expanded_path(), &skill_name)
-        {
+        if let Ok(_) = crate::core::linker::Linker::unlink(&tool.expanded_path(), &skill_name) {
             count += 1;
         }
     }
@@ -628,11 +658,9 @@ pub fn sync_skills(
                 continue;
             }
             if resolver.is_skill_allowed(&create_minimal_skill(&name, &skill_path), &tool.id) {
-                if let Ok(_) = crate::core::linker::Linker::link(
-                    &skill_path,
-                    &tool.expanded_path(),
-                    &name,
-                ) {
+                if let Ok(_) =
+                    crate::core::linker::Linker::link(&skill_path, &tool.expanded_path(), &name)
+                {
                     count += 1;
                 }
             }
