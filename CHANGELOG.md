@@ -1,3 +1,9 @@
+## [0.6.3](https://github.com/zhangsubo/skillsPanel/compare/v0.6.2...v0.6.3) (2026-06-01)
+
+### 修复
+
+* UpdateDialog 按钮显示 i18n key + 点击无反应 ([982b15e](https://github.com/zhangsubo/skillsPanel/commit/982b15edd90de8308a661f3f905a19dbeb1c2941))
+
 ## [0.6.2](https://github.com/zhangsubo/skillsPanel/compare/v0.6.1...v0.6.2) (2026-06-01)
 
 ### 修复
