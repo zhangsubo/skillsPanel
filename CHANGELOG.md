@@ -1,3 +1,9 @@
+## [0.6.2](https://github.com/zhangsubo/skillsPanel/compare/v0.6.1...v0.6.2) (2026-06-01)
+
+### 修复
+
+* 修复 tool.path 含 ~ 时 link_skill 显示未链接, 加 self-heal ([a4fa78d](https://github.com/zhangsubo/skillsPanel/commit/a4fa78df14d357b70ff64880ffba196dae5c9ece))
+
 ## [0.6.0](https://github.com/zhangsubo/skillsPanel/compare/v0.5.1...v0.6.0) (2026-05-28)
 
 ### 功能
