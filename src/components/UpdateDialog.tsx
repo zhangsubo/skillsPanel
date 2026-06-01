@@ -27,10 +27,12 @@ export default function UpdateDialog({
   const { t } = useTranslation()
   const [downloading, setDownloading] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [error, setError] = useState<string | null>(null)
 
   const handleDownload = async () => {
     setDownloading(true)
     setProgress(0)
+    setError(null)
 
     const success = await downloadAndInstallUpdate((p) => {
       setProgress(Math.round(p.percent))
@@ -39,6 +41,9 @@ export default function UpdateDialog({
     if (!success) {
       setDownloading(false)
       setProgress(0)
+      // Surface the failure to the user instead of silently resetting,
+      // so they know to retry or check their network / Tauri capabilities.
+      setError(t('updateDialog.error'))
     }
   }
 
@@ -48,6 +53,11 @@ export default function UpdateDialog({
         <DialogHeader>
           <DialogTitle>{t('updateDialog.title')}</DialogTitle>
           <DialogDescription className="space-y-2">
+            {error && (
+              <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">
+                {error}
+              </div>
+            )}
             <p>
               {t('updateDialog.description', {
                 currentVersion,
