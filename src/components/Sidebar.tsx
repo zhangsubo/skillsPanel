@@ -115,14 +115,17 @@ export default function Sidebar() {
       {showAddDialog && (
         <AddProjectDialog
           onClose={() => setShowAddDialog(false)}
-          onAdded={() => setShowAddDialog(false)}
+          onAdded={(id) => {
+            setShowAddDialog(false);
+            navigate(`/projects/${id}`);
+          }}
         />
       )}
     </aside>
   );
 }
 
-function AddProjectDialog({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+function AddProjectDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) => void }) {
   const { t } = useTranslation();
   const { addProject } = useProjects();
   const [name, setName] = useState("");
@@ -135,8 +138,8 @@ function AddProjectDialog({ onClose, onAdded }: { onClose: () => void; onAdded: 
     setSubmitting(true);
     setError(null);
     try {
-      await addProject(name.trim(), rootPath.trim());
-      onAdded();
+      const id = await addProject(name.trim(), rootPath.trim());
+      onAdded(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

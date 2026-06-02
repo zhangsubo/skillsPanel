@@ -1027,12 +1027,13 @@ pub fn create_project(
     state: State<'_, SharedState>,
     name: String,
     root_path: String,
-) -> Result<(), AppError> {
+) -> Result<String, AppError> {
     let state = state.lock().unwrap();
     let database = state.database.lock().unwrap();
     let repo = crate::core::database::ProjectsRepository::new(&database);
     let id = uuid::Uuid::new_v4().to_string();
-    repo.create(&id, &name, &root_path)
+    repo.create(&id, &name, &root_path)?;
+    Ok(id)
 }
 
 #[tauri::command]
@@ -1060,15 +1061,18 @@ pub fn scan_project(
 ) -> Result<crate::core::models::ProjectDto, AppError> {
     let state = state.lock().unwrap();
     let database = state.database.lock().unwrap();
-    let _library = state.library.lock().unwrap();
 
     let projects_repo = crate::core::database::ProjectsRepository::new(&database);
     let project = projects_repo
         .get_by_id(&project_id)?
         .ok_or_else(|| AppError::SkillNotFound(format!("Project not found: {}", project_id)))?;
 
-    let mut skills =
-        crate::core::project_scanner::ProjectScanner::scan_project_skills(&project.root_path)?;
+    // 两阶段扫描：phase1 立即收集元信息（不进任何 IO 锁），phase2 集中算 hash。
+    // 根因 1（性能瓶颈）+ 根因 4（_library 无意义锁）一起修。
+    let mut skills = crate::core::project_scanner::ProjectScanner::scan_project_skills_phase1(
+        &project.root_path,
+    )?;
+    crate::core::project_scanner::ProjectScanner::compute_all_hashes(&mut skills)?;
 
     let skills_repo = crate::core::database::SkillsRepository::new(&database);
     let center_skills = skills_repo.get_all_active()?;

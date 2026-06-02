@@ -5,8 +5,8 @@ export async function listProjects(): Promise<Project[]> {
   return invokeCommand<Project[]>('list_projects');
 }
 
-export async function createProject(name: string, rootPath: string): Promise<void> {
-  return invokeCommand<void>('create_project', { name, rootPath });
+export async function createProject(name: string, rootPath: string): Promise<string> {
+  return invokeCommand<string>('create_project', { name, rootPath });
 }
 
 export async function deleteProject(projectId: string): Promise<void> {

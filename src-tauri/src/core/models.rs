@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {
@@ -278,6 +279,11 @@ pub struct ProjectSkillInfo {
     pub in_center: bool,
     pub center_skill_id: Option<String>,
     pub sync_status: SyncHealthStatus,
+    /// 指向项目根下该 skill 的实际目录。
+    /// 两阶段扫描（phase1 收集 + phase2 计算 hash）需要在 Rust 内部保留此路径，
+    /// 但前端无需关心。前端类型不暴露此字段。
+    #[serde(skip_serializing)]
+    pub skill_root: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

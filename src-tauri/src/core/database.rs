@@ -310,8 +310,9 @@ impl<'a> SkillsRepository<'a> {
                 original_git_url, original_git_subpath, group_name, description,
                 frontmatter, created_at, mtime_ms, source_type, is_deleted,
                 last_seen_at, first_seen_at, is_installed, installed_at,
-                source_revision, source_remote_revision, source_update_status
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+                source_revision, source_remote_revision, source_update_status,
+                content_hash
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 path_hash = excluded.path_hash,
@@ -327,7 +328,8 @@ impl<'a> SkillsRepository<'a> {
                 installed_at = ?18,
                 source_revision = COALESCE(excluded.source_revision, skills.source_revision),
                 source_remote_revision = COALESCE(excluded.source_remote_revision, skills.source_remote_revision),
-                source_update_status = COALESCE(excluded.source_update_status, skills.source_update_status)",
+                source_update_status = COALESCE(excluded.source_update_status, skills.source_update_status),
+                content_hash = excluded.content_hash",
             params![
                 skill.id, skill.name, skill.path_hash, skill.library_path,
                 skill.original_source_path, skill.original_git_url, skill.original_git_subpath,
@@ -336,6 +338,7 @@ impl<'a> SkillsRepository<'a> {
                 now, skill.created_at,
                 1 as i32, now,
                 skill.source_revision, skill.source_remote_revision, update_status_str,
+                skill.content_hash,
             ],
         )
         .map_err(|e| AppError::Config(format!("Failed to upsert skill: {}", e)))?;
@@ -350,7 +353,8 @@ impl<'a> SkillsRepository<'a> {
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
                         frontmatter, created_at, mtime_ms, source_type, is_deleted,
-                        source_revision, source_remote_revision, source_update_status
+                        source_revision, source_remote_revision, source_update_status,
+                        content_hash
                  FROM skills WHERE is_installed = 1 AND is_deleted = 0 ORDER BY name",
             )
             .map_err(|e| AppError::Config(format!("Failed to prepare query: {}", e)))?;
@@ -365,7 +369,8 @@ impl<'a> SkillsRepository<'a> {
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
                         frontmatter, created_at, mtime_ms, source_type, is_deleted,
-                        source_revision, source_remote_revision, source_update_status
+                        source_revision, source_remote_revision, source_update_status,
+                        content_hash
                  FROM skills WHERE is_deleted = 0 ORDER BY name",
             )
             .map_err(|e| AppError::Config(format!("Failed to prepare query: {}", e)))?;
@@ -430,7 +435,8 @@ impl<'a> SkillsRepository<'a> {
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
                         frontmatter, created_at, mtime_ms, source_type, is_deleted,
-                        source_revision, source_remote_revision, source_update_status
+                        source_revision, source_remote_revision, source_update_status,
+                        content_hash
                  FROM skills WHERE name = ?1",
                 params![name],
                 |row| Self::row_to_skill(row),
@@ -568,7 +574,8 @@ impl<'a> SkillsRepository<'a> {
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
                         frontmatter, created_at, mtime_ms, source_type, is_deleted,
-                        source_revision, source_remote_revision, source_update_status
+                        source_revision, source_remote_revision, source_update_status,
+                        content_hash
                  FROM skills WHERE first_seen_at = ?1 AND is_deleted = 0
                  ORDER BY name",
             )
@@ -584,7 +591,8 @@ impl<'a> SkillsRepository<'a> {
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
                         frontmatter, created_at, mtime_ms, source_type, is_deleted,
-                        source_revision, source_remote_revision, source_update_status
+                        source_revision, source_remote_revision, source_update_status,
+                        content_hash
                  FROM skills
                  WHERE last_seen_at = ?1
                  AND first_seen_at != last_seen_at
@@ -605,7 +613,8 @@ impl<'a> SkillsRepository<'a> {
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
                         frontmatter, created_at, mtime_ms, source_type, is_deleted,
-                        source_revision, source_remote_revision, source_update_status
+                        source_revision, source_remote_revision, source_update_status,
+                        content_hash
                  FROM skills WHERE is_deleted = 1 ORDER BY last_seen_at DESC",
             )
             .map_err(|e| {
@@ -622,7 +631,8 @@ impl<'a> SkillsRepository<'a> {
                 "SELECT id, name, path_hash, library_path, original_source_path,
                         original_git_url, original_git_subpath, group_name, description,
                         frontmatter, created_at, mtime_ms, source_type, is_deleted,
-                        source_revision, source_remote_revision, source_update_status
+                        source_revision, source_remote_revision, source_update_status,
+                        content_hash
                  FROM skills WHERE id = ?1",
             )
             .map_err(|e| AppError::Config(format!("Failed to prepare skill query: {}", e)))?;
@@ -665,7 +675,7 @@ impl<'a> SkillsRepository<'a> {
                 _ => SkillSourceType::LocalFolder,
             },
             is_deleted: row.get::<_, i32>(13)? != 0,
-            content_hash: None,
+            content_hash: row.get(17)?,
             source_revision: row.get(14)?,
             source_remote_revision: row.get(15)?,
             source_update_status,
@@ -1336,6 +1346,45 @@ mod tests {
             )
             .unwrap();
         assert_eq!(hash, Some("sha256abc123".to_string()));
+    }
+
+    #[test]
+    fn test_get_all_active_includes_content_hash() {
+        // 根因 5 回归测试：get_all_active 必须读出 content_hash 列。
+        // 当前实现 SELECT 列表漏 content_hash + row_to_skill 写死 None → 必红。
+        let db = create_test_database();
+        let repo = SkillsRepository::new(&db);
+
+        let skill = Skill {
+            id: "hash-active".to_string(),
+            name: "hash-active-skill".to_string(),
+            path_hash: "h".to_string(),
+            library_path: "/test".to_string(),
+            original_source_path: None,
+            original_git_url: None,
+            original_git_subpath: None,
+            group: "default".to_string(),
+            description: "".to_string(),
+            frontmatter: HashMap::new(),
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            mtime_ms: 0,
+            source_type: SkillSourceType::LocalFolder,
+            is_deleted: false,
+            content_hash: Some("sha256:h_abc".to_string()),
+            source_revision: None,
+            source_remote_revision: None,
+            source_update_status: Default::default(),
+        };
+
+        repo.upsert(&skill).unwrap();
+
+        let active = repo.get_all_active().unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(
+            active[0].content_hash.as_deref(),
+            Some("sha256:h_abc"),
+            "get_all_active 必须读出 content_hash 列（修复 SELECT 列表漏列 + row_to_skill 写死 None）"
+        );
     }
 
     #[test]

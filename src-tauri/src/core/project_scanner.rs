@@ -9,7 +9,37 @@ use std::path::Path;
 pub struct ProjectScanner;
 
 impl ProjectScanner {
+    /// 阶段 1：仅收集元信息（name / description / skill_root 路径），不计算 content_hash。
+    /// 必须在几百毫秒内完成，因为前端的"立即可见"UX 依赖它。
+    pub fn scan_project_skills_phase1(
+        project_root: &str,
+    ) -> Result<Vec<ProjectSkillInfo>, AppError> {
+        Self::scan_project_root(project_root)
+    }
+
+    /// 阶段 2：对 phase1 收齐的 skills 按 skill_root 逐个计算 SHA256 目录 hash，填回 content_hash。
+    /// 串行执行（不引 rayon，避免 build 体积 + 复杂度）。原本单次扫描的耗时集中在这里。
+    pub fn compute_all_hashes(skills: &mut [ProjectSkillInfo]) -> Result<(), AppError> {
+        for skill in skills.iter_mut() {
+            if skill.skill_root.as_os_str().is_empty() {
+                continue;
+            }
+            skill.content_hash = fs_utils::hash_directory(&skill.skill_root).ok();
+        }
+        Ok(())
+    }
+
+    /// 兼容旧 API：phase1 + phase2 一气呵成。供 `import_project_skill_to_center` 等需要完整
+    /// hash 信息的调用点使用。
     pub fn scan_project_skills(project_root: &str) -> Result<Vec<ProjectSkillInfo>, AppError> {
+        let mut skills = Self::scan_project_root(project_root)?;
+        Self::compute_all_hashes(&mut skills)?;
+        Ok(skills)
+    }
+
+    /// 内部共享扫描逻辑：遍历 4 个 agent 目录的 skills / skills-disabled 子目录，
+    /// 收集元信息 + skill_root 路径。**不**算 content_hash（由 compute_all_hashes 集中算）。
+    fn scan_project_root(project_root: &str) -> Result<Vec<ProjectSkillInfo>, AppError> {
         let root = Path::new(project_root);
         if !root.exists() {
             return Err(AppError::Validation(format!(
@@ -76,7 +106,7 @@ impl ProjectScanner {
 
             let skill_md = fs_utils::find_skill_marker(&path);
             let content = skill_md.as_ref().and_then(|p| fs::read_to_string(p).ok());
-            let (name, description, content_hash) = if let Some(content) = content {
+            let (name, description) = if let Some(content) = content {
                 let (fm, _) = fs_utils::parse_frontmatter(&content).unwrap_or_default();
                 let name = fm
                     .get("name")
@@ -88,10 +118,9 @@ impl ProjectScanner {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let hash = fs_utils::hash_directory(&path).ok();
-                (name, desc, hash)
+                (name, desc)
             } else {
-                (name_str.to_string(), String::new(), None)
+                (name_str.to_string(), String::new())
             };
 
             skills.push(ProjectSkillInfo {
@@ -100,10 +129,11 @@ impl ProjectScanner {
                 relative_path: name_str.to_string(),
                 agent: agent.to_string(),
                 enabled,
-                content_hash,
+                content_hash: None, // phase1 不算 hash；phase2 在 command 内集中算
                 in_center: false,
                 center_skill_id: None,
                 sync_status: SyncHealthStatus::ProjectOnly,
+                skill_root: path,
             });
         }
     }
@@ -352,6 +382,107 @@ mod tests {
     }
 
     #[test]
+    fn test_scan_phase1_skips_hash() {
+        // 根因 1 性能瓶颈回归：phase1 收集元信息时绝不能调 hash_directory。
+        // 当前 read_skills_from_dir 同步算 hash，大目录会耗时 100ms+。phase1 必须 < 200ms。
+        let temp = TempDir::new().unwrap();
+        let skill_dir = temp
+            .path()
+            .join(".claude")
+            .join("skills")
+            .join("slow-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: slow-skill\ndescription: x\n---\n# body",
+        )
+        .unwrap();
+        // 加 99 个大文件模拟大 skill，让 hash_directory 显著变慢（>200ms）
+        for i in 0..99 {
+            fs::write(
+                skill_dir.join(format!("file_{i:03}.txt")),
+                "x".repeat(10_000),
+            )
+            .unwrap();
+        }
+
+        let start = std::time::Instant::now();
+        let skills =
+            ProjectScanner::scan_project_skills_phase1(&temp.path().to_string_lossy()).unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(skills.len(), 1, "phase1 必须返回该 skill");
+        assert_eq!(skills[0].name, "slow-skill");
+        assert!(
+            skills[0].content_hash.is_none(),
+            "phase1 不应该算 hash（content_hash 应为 None）"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_millis(200),
+            "phase1 耗时 {elapsed:?} 超 200ms 上限（当前实现会同步算 hash，必超时）"
+        );
+    }
+
+    #[test]
+    fn test_scan_phase2_fills_hashes() {
+        // 阶段 4 第二阶段：拿到 phase1 列表后，compute_all_hashes 必须填回 content_hash。
+        let temp = TempDir::new().unwrap();
+        let skill_dir = temp
+            .path()
+            .join(".claude")
+            .join("skills")
+            .join("phased-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: phased-skill\ndescription: y\n---\n# body",
+        )
+        .unwrap();
+
+        let mut skills =
+            ProjectScanner::scan_project_skills_phase1(&temp.path().to_string_lossy()).unwrap();
+        assert_eq!(skills.len(), 1);
+        assert!(skills[0].content_hash.is_none());
+
+        ProjectScanner::compute_all_hashes(&mut skills).unwrap();
+
+        assert!(
+            skills[0].content_hash.is_some(),
+            "phase2 之后 content_hash 必须被填回"
+        );
+        assert!(
+            !skills[0].content_hash.as_ref().unwrap().is_empty(),
+            "content_hash 不能是空字符串"
+        );
+    }
+
+    #[test]
+    fn test_scan_phase1_serializes_path_internally() {
+        // 验证 skill_root 字段不进 JSON 序列化（前端拿不到绝对路径）
+        let temp = TempDir::new().unwrap();
+        let skill_dir = temp
+            .path()
+            .join(".claude")
+            .join("skills")
+            .join("private-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: private-skill\n---\n",
+        )
+        .unwrap();
+
+        let skills =
+            ProjectScanner::scan_project_skills_phase1(&temp.path().to_string_lossy()).unwrap();
+
+        let json = serde_json::to_string(&skills[0]).unwrap();
+        assert!(
+            !json.contains("skill_root"),
+            "skill_root 必须 #[serde(skip_serializing)]，前端不能拿到内部路径: {json}"
+        );
+    }
+
+    #[test]
     fn test_sync_health_computation() {
         let skills = vec![
             ProjectSkillInfo {
@@ -364,6 +495,7 @@ mod tests {
                 in_center: true,
                 center_skill_id: Some("1".into()),
                 sync_status: SyncHealthStatus::InSync,
+                skill_root: PathBuf::new(),
             },
             ProjectSkillInfo {
                 name: "only".into(),
@@ -375,6 +507,7 @@ mod tests {
                 in_center: false,
                 center_skill_id: None,
                 sync_status: SyncHealthStatus::ProjectOnly,
+                skill_root: PathBuf::new(),
             },
         ];
 
