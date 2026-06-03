@@ -9,6 +9,8 @@
   "error.title": "Something went wrong",
   "error.unknown": "An unexpected error occurred.",
   "error.retry": "Try again",
+  "common.close": "Close",
+  "common.loading": "Loading…",
   "dashboard.title": "Dashboard",
   "dashboard.subtitle": "Overview of your Skills and Agents.",
   "dashboard.skills": "Skills",
@@ -181,5 +183,26 @@
   "project.filter.disabled": "Disabled",
   "project.scopeProject": "Project only",
   "project.syncEnabled": "Sync status: Enabled",
-  "project.noSkills": "No skills in this project."
+  "project.noSkills": "No skills in this project.",
+
+  "detail.tags": "Tags",
+  "detail.tagsCount": "({{count}})",
+  "detail.addTag": "Add Tag",
+  "detail.manageTags": "Manage",
+  "detail.noTags": "This skill has no tags yet.",
+  "detail.noAvailableTags": "No tags available to add. Create one first.",
+
+  "tag.manage": "Manage Tags",
+  "tag.manageDescription": "Create and delete tags for your skills. Tags are stored only in the local DB and never modify SKILL.md.",
+  "tag.namePlaceholder": "New tag name",
+  "tag.colorLabel": "Color",
+  "tag.create": "Create",
+  "tag.confirmDelete": "Delete this tag? Skills will not be removed.",
+  "tag.deleteAriaLabel": "Delete tag {{name}}",
+  "tag.empty": "No tags yet. Create one to get started.",
+  "tag.applyToN": "Apply to {{count}}",
+  "tag.applyToCurrent": "Toggle tag",
+  "tag.attach": "Add",
+  "tag.detach": "Attached",
+  "tag.filterAll": "All"
 }

@@ -9,6 +9,8 @@
   "error.title": "出现错误",
   "error.unknown": "发生了意外错误。",
   "error.retry": "重试",
+  "common.close": "关闭",
+  "common.loading": "加载中…",
   "dashboard.title": "仪表盘",
   "dashboard.subtitle": "Skills 和 Agent 的概览。",
   "dashboard.skills": "Skills",
@@ -181,5 +183,26 @@
   "project.filter.disabled": "已停用",
   "project.scopeProject": "仅项目",
   "project.syncEnabled": "同步状态：已启用",
-  "project.noSkills": "该项目中暂无 Skills。"
+  "project.noSkills": "该项目中暂无 Skills。",
+
+  "detail.tags": "标签",
+  "detail.tagsCount": "{{count}} 个",
+  "detail.addTag": "添加标签",
+  "detail.manageTags": "管理标签",
+  "detail.noTags": "该 Skill 还没有任何标签。",
+  "detail.noAvailableTags": "没有可添加的标签，先去创建一个吧。",
+
+  "tag.manage": "管理标签",
+  "tag.manageDescription": "为你的 Skills 创建、删除标签。标签仅存储在本地数据库，不修改 SKILL.md。",
+  "tag.namePlaceholder": "新标签名",
+  "tag.colorLabel": "颜色",
+  "tag.create": "创建",
+  "tag.confirmDelete": "确认删除该标签？关联的 Skill 不会被删除。",
+  "tag.deleteAriaLabel": "删除标签 {{name}}",
+  "tag.empty": "暂无标签，先创建一个吧。",
+  "tag.applyToN": "应用到 {{count}} 个",
+  "tag.applyToCurrent": "应用此标签",
+  "tag.attach": "添加",
+  "tag.detach": "已附加",
+  "tag.filterAll": "全部"
 }

@@ -2,16 +2,31 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useLibrary } from '@/hooks/use-library'
+import { useTags } from '@/hooks/use-tags'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ArrowLeft, Folder, Loader2 } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { TagChip } from '@/components/TagChip'
+import { TagManagerDialog } from '@/components/TagManagerDialog'
+import { ArrowLeft, Folder, Loader2, Plus, Tag as TagIcon } from 'lucide-react'
+import type { Tag } from '@/types'
+
+const safeErrorMessage = (e: unknown): string =>
+  e instanceof Error ? e.message : String(e);
 
 export default function SkillDetail() {
   const { skillName } = useParams<{ skillName: string }>()
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { installedSkills, scanResult, scan, tools, fetchTools, getContent, linkSkill, unlinkSkill } = useLibrary()
+  const { tags: allTags, loading: tagsLoading, refresh: refreshTags, attach, detach, tagsForSkill } = useTags()
 
   const [content, setContent] = useState<string | null>(null)
   const [contentLoading, setContentLoading] = useState(true)
@@ -20,7 +35,22 @@ export default function SkillDetail() {
   const [localLinkedTools, setLocalLinkedTools] = useState<Set<string>>(new Set())
   const [toggleError, setToggleError] = useState<string | null>(null)
 
-  const decodedName = skillName ? decodeURIComponent(skillName) : ''
+  // Tag UI state — kept local to this page so the global tag list cache isn't
+  // disturbed by per-skill attach/detach optimistic updates.
+  const [attachedTags, setAttachedTags] = useState<Tag[]>([])
+  const [tagsBusy, setTagsBusy] = useState(false)
+  const [addTagOpen, setAddTagOpen] = useState(false)
+  const [manageOpen, setManageOpen] = useState(false)
+  const [tagError, setTagError] = useState<string | null>(null)
+
+  const decodedName = useMemo(() => {
+    if (!skillName) return ''
+    try {
+      return decodeURIComponent(skillName)
+    } catch {
+      return ''
+    }
+  }, [skillName])
 
   useEffect(() => {
     if (!scanResult) {
@@ -109,6 +139,84 @@ export default function SkillDetail() {
   const syncedCount = enabledTools.filter((tool) =>
     linkedToolIds.includes(tool.id),
   ).length
+
+  // ── Tag fetch + handlers ────────────────────────────────────────
+  // skillId is the stable DB row id; tag attach/detach is keyed on it,
+  // not on the human-readable skill name.
+  const skillId = skillWithStatus?.skill.id
+
+  const fetchAttachedTags = useCallback(async () => {
+    if (!skillId) {
+      setAttachedTags([])
+      return
+    }
+    try {
+      const list = await tagsForSkill(skillId)
+      setAttachedTags(list)
+    } catch (err) {
+      setTagError(safeErrorMessage(err))
+    }
+  }, [skillId, tagsForSkill])
+
+  // Refetch attached tags whenever the page identifies a new skill.
+  useEffect(() => {
+    void fetchAttachedTags()
+  }, [fetchAttachedTags])
+
+  // Take the full Tag object so the optimistic insert is independent of the
+  // global tag list cache (which may not be loaded yet, or may be stale after
+  // the global TagManagerDialog creates new tags from another component).
+  const handleAttach = useCallback(
+    async (tag: Tag) => {
+      if (!skillId) return
+      setTagsBusy(true)
+      setTagError(null)
+      try {
+        await attach(skillId, tag.id)
+        setAttachedTags((prev) =>
+          prev.some((t) => t.id === tag.id) ? prev : [...prev, tag],
+        )
+      } catch (err) {
+        setTagError(safeErrorMessage(err))
+      } finally {
+        setTagsBusy(false)
+      }
+    },
+    [skillId, attach],
+  )
+
+  const handleDetach = useCallback(
+    async (tagId: string) => {
+      if (!skillId) return
+      setTagsBusy(true)
+      setTagError(null)
+      try {
+        await detach(skillId, tagId)
+        setAttachedTags((prev) => prev.filter((t) => t.id !== tagId))
+      } catch (err) {
+        setTagError(safeErrorMessage(err))
+      } finally {
+        setTagsBusy(false)
+      }
+    },
+    [skillId, detach],
+  )
+
+  // Refetch after the global manager closes — tag list or attach set may have changed.
+  const handleManageClose = useCallback(() => {
+    setManageOpen(false)
+    void refreshTags()
+    void fetchAttachedTags()
+  }, [refreshTags, fetchAttachedTags])
+
+  const attachedTagIds = useMemo(
+    () => new Set(attachedTags.map((t) => t.id)),
+    [attachedTags],
+  )
+  const availableTags = useMemo(
+    () => allTags.filter((tg) => !attachedTagIds.has(tg.id)),
+    [allTags, attachedTagIds],
+  )
 
   if (!scanResult) {
     return (
@@ -225,6 +333,63 @@ export default function SkillDetail() {
 
       <Card>
         <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <TagIcon className="h-4 w-4" />
+              {t('detail.tags')}
+              {attachedTags.length > 0 && (
+                <span className="text-xs font-normal text-muted-foreground">
+                  {t('detail.tagsCount', { count: attachedTags.length })}
+                </span>
+              )}
+            </CardTitle>
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setAddTagOpen(true)}
+                disabled={tagsLoading}
+                data-testid="add-tag-btn"
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                {t('detail.addTag')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setManageOpen(true)}
+              >
+                {t('detail.manageTags')}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {tagError && (
+            <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {tagError}
+            </div>
+          )}
+          {attachedTags.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t('detail.noTags')}</p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-1.5" data-testid="attached-tag-list">
+              {attachedTags.map((tag) => (
+                <TagChip
+                  key={tag.id}
+                  tag={tag}
+                  onRemove={tagsBusy ? undefined : () => handleDetach(tag.id)}
+                />
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
           <CardTitle className="text-base">{t('library.markdownPreview')}</CardTitle>
         </CardHeader>
         <CardContent>
@@ -256,6 +421,58 @@ export default function SkillDetail() {
           )}
         </CardContent>
       </Card>
+
+      {/* Add-tag picker: shows tags not yet attached. Single-click attaches and closes. */}
+      <Dialog open={addTagOpen} onOpenChange={(o) => !o && setAddTagOpen(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <TagIcon className="h-4 w-4" />
+              {t('detail.addTag')}
+            </DialogTitle>
+          </DialogHeader>
+          {availableTags.length === 0 ? (
+            <p className="py-4 text-center text-xs text-muted-foreground">
+              {t('detail.noAvailableTags')}
+            </p>
+          ) : (
+            <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2">
+              {availableTags.map((tag) => (
+                <button
+                  key={tag.id}
+                  type="button"
+                  disabled={tagsBusy}
+                  onClick={() => {
+                    // Always close the dialog on click — even if attach fails,
+                    // the error is surfaced in the inline `tagError` strip
+                    // below the tag list. (handleAttach is fire-and-forget.)
+                    void handleAttach(tag)
+                    setAddTagOpen(false)
+                  }}
+                  className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-muted/50 disabled:opacity-50"
+                >
+                  <TagChip tag={tag} />
+                  <Plus className="h-3.5 w-3.5 text-muted-foreground" />
+                </button>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setAddTagOpen(false)}>
+              {t('common.close')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Full tag CRUD dialog, scoped to this skill via selectedSkillIds. */}
+      {skillId && (
+        <TagManagerDialog
+          open={manageOpen}
+          onClose={handleManageClose}
+          selectedSkillIds={[skillId]}
+        />
+      )}
     </div>
   )
 }
