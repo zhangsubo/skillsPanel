@@ -5,6 +5,7 @@ use crate::core::library::SkillLibrary;
 use crate::core::models::*;
 use crate::core::repo_lock::RepoLock;
 use crate::core::skill_engine::SkillEngine;
+use crate::core::sync::SyncProvider;
 use crate::AppState;
 use std::sync::Mutex;
 use tauri::Emitter;
@@ -1138,6 +1139,382 @@ pub fn export_skill_to_project(
 #[tauri::command]
 pub fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
+}
+
+// ── Tag commands ────────────────────────────────────────────────────
+// Tags live entirely in the local DB. None of these commands touch
+// SKILL.md, the central library filesystem, or sync targets.
+
+#[tauri::command]
+pub fn list_tags(state: State<'_, SharedState>) -> Result<Vec<crate::core::models::Tag>, AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    crate::core::database::TagsRepository::new(&database).list()
+}
+
+#[tauri::command]
+pub fn create_tag(
+    state: State<'_, SharedState>,
+    name: String,
+    color: Option<String>,
+    description: Option<String>,
+) -> Result<crate::core::models::Tag, AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    let tag = crate::core::database::TagsRepository::new(&database).create(
+        &name,
+        color.as_deref(),
+        description.as_deref(),
+    )?;
+    crate::core::database::AuditRepository::new(&database).log(
+        "create_tag",
+        &tag.id,
+        Some(format!("name={}", tag.name)),
+        true,
+        None,
+    )?;
+    Ok(tag)
+}
+
+#[tauri::command]
+pub fn update_tag(
+    state: State<'_, SharedState>,
+    id: String,
+    name: Option<String>,
+    color: Option<String>,
+    description: Option<String>,
+) -> Result<(), AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    crate::core::database::TagsRepository::new(&database).update(
+        &id,
+        name.as_deref(),
+        color.as_deref(),
+        description.as_deref(),
+    )?;
+    crate::core::database::AuditRepository::new(&database).log(
+        "update_tag",
+        &id,
+        None,
+        true,
+        None,
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_tag(state: State<'_, SharedState>, id: String) -> Result<(), AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    crate::core::database::TagsRepository::new(&database).delete(&id)?;
+    crate::core::database::AuditRepository::new(&database).log(
+        "delete_tag",
+        &id,
+        None,
+        true,
+        None,
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn attach_tag(
+    state: State<'_, SharedState>,
+    skill_id: String,
+    tag_id: String,
+) -> Result<(), AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    crate::core::database::TagsRepository::new(&database).attach(&skill_id, &tag_id)?;
+    crate::core::database::AuditRepository::new(&database).log(
+        "attach_tag",
+        &tag_id,
+        Some(format!("skill_id={skill_id}")),
+        true,
+        None,
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn detach_tag(
+    state: State<'_, SharedState>,
+    skill_id: String,
+    tag_id: String,
+) -> Result<(), AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    crate::core::database::TagsRepository::new(&database).detach(&skill_id, &tag_id)?;
+    crate::core::database::AuditRepository::new(&database).log(
+        "detach_tag",
+        &tag_id,
+        Some(format!("skill_id={skill_id}")),
+        true,
+        None,
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn bulk_attach_tag(
+    state: State<'_, SharedState>,
+    skill_ids: Vec<String>,
+    tag_id: String,
+) -> Result<crate::core::models::BulkAttachResult, AppError> {
+    if skill_ids.len() > crate::core::database::BULK_TAG_ATTACH_MAX {
+        return Err(AppError::Validation(format!(
+            "bulk_attach_tag: too many skill_ids ({} > {})",
+            skill_ids.len(),
+            crate::core::database::BULK_TAG_ATTACH_MAX
+        )));
+    }
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    let refs: Vec<&str> = skill_ids.iter().map(String::as_str).collect();
+    let result =
+        crate::core::database::TagsRepository::new(&database).bulk_attach(&refs, &tag_id)?;
+    crate::core::database::AuditRepository::new(&database).log(
+        "bulk_attach_tag",
+        &tag_id,
+        Some(format!(
+            "attached={} skipped={} requested={}",
+            result.attached,
+            result.skipped,
+            skill_ids.len()
+        )),
+        true,
+        None,
+    )?;
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn get_skill_tags(
+    state: State<'_, SharedState>,
+    skill_id: String,
+) -> Result<Vec<crate::core::models::Tag>, AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    crate::core::database::TagsRepository::new(&database).list_tags_for_skill(&skill_id)
+}
+
+#[tauri::command]
+pub fn get_all_skill_tags(
+    state: State<'_, SharedState>,
+) -> Result<Vec<(String, crate::core::models::Tag)>, AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    crate::core::database::TagsRepository::new(&database).list_all_skill_tags()
+}
+
+// ── Sync commands ─────────────────────────────────────────────────
+// All sync commands go through SyncEngine; the command layer is
+// responsible for (1) holding the DB lock, (2) fetching credentials
+// from the config table, (3) instantiating the right SyncProvider,
+// (4) writing the audit log. The engine handles history + status.
+
+fn fetch_sync_password(database: &crate::core::database::Database) -> Result<String, AppError> {
+    use crate::core::sync::engine::PASSWORD_CONFIG_KEY;
+    crate::core::database::ConfigRepository::new(database)
+        .get(PASSWORD_CONFIG_KEY)
+        .map_err(|e| AppError::Config(format!("Failed to read archive password: {e}")))?
+        .ok_or_else(|| AppError::Config("Archive password not set. Configure it in Settings.".into()))
+}
+
+fn build_sync_provider(
+    database: &crate::core::database::Database,
+    provider: &crate::core::models::SyncProvider,
+) -> Result<crate::core::sync::BoxedSyncProvider, AppError> {
+    use crate::core::sync::{GitHubZipProvider, WebDavProvider};
+    let config = crate::core::sync::parse_config_json(&provider.config_json)
+        .map_err(|e| AppError::Config(format!("Invalid provider config: {e}")))?;
+    match provider.kind.as_str() {
+        "github_zip" => {
+            let repo = config
+                .get("repo")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| AppError::Config("github_zip provider missing 'repo' field".into()))?
+                .to_string();
+            let branch = config
+                .get("branch")
+                .and_then(|v| v.as_str())
+                .unwrap_or("main")
+                .to_string();
+            // Token is stored separately in `github_token` SENSITIVE_KEY.
+            let token = crate::core::database::ConfigRepository::new(database)
+                .get("github_token")?
+                .unwrap_or_default();
+            Ok(crate::core::sync::BoxedSyncProvider::new(
+                GitHubZipProvider::new(repo, branch, token),
+            ))
+        }
+        "webdav" => {
+            let url = config
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| AppError::Config("webdav provider missing 'url' field".into()))?
+                .to_string();
+            let remote_path = config
+                .get("remote_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let username = crate::core::database::ConfigRepository::new(database)
+                .get("webdav_username")?
+                .unwrap_or_default();
+            let password = crate::core::database::ConfigRepository::new(database)
+                .get("webdav_password")?
+                .unwrap_or_default();
+            Ok(crate::core::sync::BoxedSyncProvider::new(
+                WebDavProvider::new(url, username, password, remote_path),
+            ))
+        }
+        other => Err(AppError::Config(format!("Unknown provider kind: {other}"))),
+    }
+}
+
+#[tauri::command]
+pub fn list_sync_providers(
+    state: State<'_, SharedState>,
+) -> Result<Vec<crate::core::models::SyncProvider>, AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    crate::core::database::SyncProvidersRepository::new(&database).list(false)
+}
+
+#[tauri::command]
+pub fn create_sync_provider(
+    state: State<'_, SharedState>,
+    name: String,
+    kind: String,
+    config_json: String,
+) -> Result<crate::core::models::SyncProvider, AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    let provider = crate::core::database::SyncProvidersRepository::new(&database)
+        .create(&name, &kind, &config_json, true)?;
+    crate::core::database::AuditRepository::new(&database).log(
+        "create_sync_provider",
+        &provider.id,
+        Some(format!("name={} kind={}", provider.name, provider.kind)),
+        true,
+        None,
+    )?;
+    Ok(provider)
+}
+
+#[tauri::command]
+pub fn update_sync_provider(
+    state: State<'_, SharedState>,
+    id: String,
+    name: Option<String>,
+    config_json: Option<String>,
+    enabled: Option<bool>,
+) -> Result<(), AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    crate::core::database::SyncProvidersRepository::new(&database)
+        .update(&id, name.as_deref(), config_json.as_deref(), enabled)?;
+    crate::core::database::AuditRepository::new(&database).log(
+        "update_sync_provider",
+        &id,
+        Some(format!("name={:?} enabled={:?}", name, enabled)),
+        true,
+        None,
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_sync_provider(
+    state: State<'_, SharedState>,
+    id: String,
+) -> Result<(), AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    crate::core::database::SyncProvidersRepository::new(&database).delete(&id)?;
+    crate::core::database::AuditRepository::new(&database).log(
+        "delete_sync_provider",
+        &id,
+        None,
+        true,
+        None,
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_sync_history(
+    state: State<'_, SharedState>,
+    provider_id: String,
+    limit: Option<usize>,
+) -> Result<Vec<crate::core::models::SyncHistory>, AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    let lim = limit.unwrap_or(20);
+    crate::core::database::SyncHistoryRepository::new(&database).list_for_provider(&provider_id, lim)
+}
+
+#[tauri::command]
+pub fn get_all_sync_history(
+    state: State<'_, SharedState>,
+    limit: Option<usize>,
+) -> Result<Vec<crate::core::models::SyncHistory>, AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    let lim = limit.unwrap_or(20);
+    crate::core::database::SyncHistoryRepository::new(&database).list_recent(lim)
+}
+
+#[tauri::command]
+pub fn test_sync_provider_connection(
+    state: State<'_, SharedState>,
+    provider_id: String,
+) -> Result<(), AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    let provider = crate::core::database::SyncProvidersRepository::new(&database)
+        .get(&provider_id)?
+        .ok_or_else(|| AppError::Config(format!("Provider {provider_id} not found")))?;
+    let concrete = build_sync_provider(&database, &provider)?;
+    concrete.test_connection()?;
+    crate::core::database::AuditRepository::new(&database).log(
+        "test_sync_provider_connection",
+        &provider_id,
+        None,
+        true,
+        None,
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn sync_now(
+    state: State<'_, SharedState>,
+    provider_id: String,
+    direction: String,
+) -> Result<crate::core::models::SyncHistory, AppError> {
+    use crate::core::sync::{run_sync_by_id, SyncDirection};
+
+    let state = state.lock().unwrap();
+    let database = state.database.lock().unwrap();
+    let direction = SyncDirection::parse(&direction)?;
+    let password = fetch_sync_password(&database)?;
+    let library_path = {
+        let cfg = crate::core::database::ConfigRepository::new(&database);
+        cfg.get("library_path")?
+            .ok_or_else(|| AppError::Config("library_path not configured".into()))
+            .map(std::path::PathBuf::from)?
+    };
+    let outcome = run_sync_by_id(
+        &database,
+        &provider_id,
+        direction,
+        &password,
+        &library_path,
+        |db_provider| build_sync_provider(&database, db_provider),
+    )?;
+    Ok(outcome.history)
 }
 
 #[cfg(test)]

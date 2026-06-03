@@ -139,7 +139,17 @@ fn base64_decode(encoded: &str) -> Result<Vec<u8>, AppError> {
     Ok(result)
 }
 
-const SENSITIVE_KEYS: &[&str] = &["proxy_url", "skillsmp_api_key", "git_backup_remote_url"];
+const SENSITIVE_KEYS: &[&str] = &[
+    "proxy_url",
+    "skillsmp_api_key",
+    "git_backup_remote_url",
+    "webdav_url",
+    "webdav_username",
+    "webdav_password",
+    "github_token",
+    "github_repo",
+    "backup_archive_password",
+];
 
 pub fn is_sensitive_key(key: &str) -> bool {
     SENSITIVE_KEYS.contains(&key)

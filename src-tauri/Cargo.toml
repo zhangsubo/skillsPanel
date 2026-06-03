@@ -8,6 +8,9 @@ description = "Agent Skill Unified Management Tool"
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[dev-dependencies]
+mockito = "1"
+
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
@@ -31,3 +34,5 @@ git2 = { version = "0.19", features = ["vendored-openssl"] }
 fs2 = "0.4"
 aes-gcm = "0.10"
 rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
+base64 = "0.22"

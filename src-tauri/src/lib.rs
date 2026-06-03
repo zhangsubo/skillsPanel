@@ -166,6 +166,23 @@ pub fn run() {
             commands::scan_project,
             commands::import_project_skill,
             commands::export_skill_to_project,
+            commands::list_tags,
+            commands::create_tag,
+            commands::update_tag,
+            commands::delete_tag,
+            commands::attach_tag,
+            commands::detach_tag,
+            commands::bulk_attach_tag,
+            commands::get_skill_tags,
+            commands::get_all_skill_tags,
+            commands::list_sync_providers,
+            commands::create_sync_provider,
+            commands::update_sync_provider,
+            commands::delete_sync_provider,
+            commands::get_sync_history,
+            commands::get_all_sync_history,
+            commands::test_sync_provider_connection,
+            commands::sync_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

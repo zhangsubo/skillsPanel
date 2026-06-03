@@ -23,3 +23,4 @@ pub mod resolver;
 pub mod scan_db;
 pub mod scanner;
 pub mod skill_engine;
+pub mod sync;

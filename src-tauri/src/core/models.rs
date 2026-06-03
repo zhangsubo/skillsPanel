@@ -1,3 +1,4 @@
+use crate::core::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -57,6 +58,28 @@ pub struct Tool {
     pub path: String,
     pub enabled: bool,
     pub is_custom: bool,
+}
+
+/// User-defined label for grouping skills in the central library.
+/// Tags are stored only in the local DB — they never modify SKILL.md.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tag {
+    pub id: String,
+    pub name: String,
+    /// Optional hex color for UI rendering (e.g. "#dea584").
+    pub color: Option<String>,
+    pub description: Option<String>,
+    pub created_at: String,
+}
+
+/// Result of `TagsRepository::bulk_attach`.
+/// Surfaces per-row outcomes so the UI can show "applied to N / M" and so
+/// silent FK skips are visible to operators / tests.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkAttachResult {
+    pub attached: usize,
+    pub skipped: usize,
 }
 
 impl Tool {
@@ -301,4 +324,119 @@ pub struct ProjectDto {
     pub project: Project,
     pub skills: Vec<ProjectSkillInfo>,
     pub sync_health: SyncHealthDto,
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncProviderKind {
+    GithubZip,
+    WebDav,
+}
+
+impl SyncProviderKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SyncProviderKind::GithubZip => "github_zip",
+            SyncProviderKind::WebDav => "webdav",
+        }
+    }
+    pub fn parse(s: &str) -> Result<Self, AppError> {
+        match s {
+            "github_zip" => Ok(SyncProviderKind::GithubZip),
+            "webdav" => Ok(SyncProviderKind::WebDav),
+            other => Err(AppError::Config(format!("Unknown sync provider kind: {other}"))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncDirection {
+    Upload,
+    Download,
+}
+
+impl SyncDirection {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SyncDirection::Upload => "upload",
+            SyncDirection::Download => "download",
+        }
+    }
+    pub fn parse(s: &str) -> Result<Self, AppError> {
+        match s {
+            "upload" => Ok(SyncDirection::Upload),
+            "download" => Ok(SyncDirection::Download),
+            other => Err(AppError::Config(format!("Unknown sync direction: {other}"))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncStatus {
+    Success,
+    Error,
+    Cancelled,
+}
+
+impl SyncStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SyncStatus::Success => "success",
+            SyncStatus::Error => "error",
+            SyncStatus::Cancelled => "cancelled",
+        }
+    }
+    pub fn parse(s: &str) -> Result<Self, AppError> {
+        match s {
+            "success" => Ok(SyncStatus::Success),
+            "error" => Ok(SyncStatus::Error),
+            "cancelled" => Ok(SyncStatus::Cancelled),
+            other => Err(AppError::Config(format!("Unknown sync status: {other}"))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncProvider {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub config_json: String,
+    pub enabled: bool,
+    pub last_sync_at: Option<String>,
+    pub last_sync_status: Option<String>,
+    pub last_sync_error: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncHistory {
+    pub id: String,
+    pub provider_id: String,
+    pub direction: String,
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub bytes_transferred: Option<i64>,
+    pub skills_count: Option<i64>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupManifest {
+    pub schema_version: u32,
+    pub created_at: String,
+    pub skills_panel_version: String,
+    pub skills: Vec<BackupManifestEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupManifestEntry {
+    pub id: String,
+    pub name: String,
+    pub content_sha256: String,
+    pub size_bytes: u64,
 }
