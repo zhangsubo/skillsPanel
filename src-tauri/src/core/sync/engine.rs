@@ -49,11 +49,14 @@ impl std::fmt::Debug for SyncOutcome {
     }
 }
 
-/// Higher-level entry: given the provider's DB id, fetch the record, build
-/// the concrete provider (caller-injected factory), and run sync.
+/// Higher-level entry: given the provider record (already fetched by
+/// the caller, with the DB lock released), drive the archive build /
+/// download and write history/audit rows. All DB operations here use
+/// **short** critical sections (lock+unlock per call) so the long
+/// sync IO doesn't pin the database Mutex.
 pub fn run_sync_by_id<P, F>(
     conn: &Database,
-    provider_id: &str,
+    provider: &crate::core::models::SyncProvider,
     direction: SyncDirection,
     archive_password: &str,
     library_path: &PathBuf,
@@ -69,14 +72,13 @@ where
         ));
     }
 
-    let prov_repo = SyncProvidersRepository::new(conn);
-    let provider = prov_repo
-        .get(provider_id)?
-        .ok_or_else(|| AppError::Config(format!("Provider {provider_id} not found")))?;
-    let concrete = factory(&provider)?;
+    let concrete = factory(provider)?;
 
-    let hist_repo = SyncHistoryRepository::new(conn);
-    let history_id = hist_repo.record_start(&provider.id, direction.as_str())?;
+    // Short-lock: record start. Returns the history id we'll need to
+    // close out below.
+    let history_id = {
+        SyncHistoryRepository::new(conn).record_start(&provider.id, direction.as_str())?
+    };
 
     let mut outcome = SyncOutcome {
         history: SyncHistory {
@@ -96,6 +98,9 @@ where
     let mut bytes_transferred: i64 = 0;
     let mut skills_count: i64 = 0;
 
+    // Long-running section: archive build + provider IO. The DB
+    // MutexGuard is NOT held here — only the provider's own state
+    // (temp dirs, network sockets) keeps the lock-equivalent.
     let result: Result<(), AppError> = (|| {
         concrete.prepare_remote()?;
         match direction {
@@ -130,26 +135,31 @@ where
         Ok(())
     })();
 
-    match result {
-        Ok(()) => {
-            hist_repo.finish(
+    // Short-lock: close out the history + provider last_sync + audit.
+    // We hold the lock only for the writes themselves, not for any
+    // user-visible delay.
+    {
+        let hist_repo = SyncHistoryRepository::new(conn);
+        let prov_repo = SyncProvidersRepository::new(conn);
+        let audit = AuditRepository::new(conn);
+        if result.is_ok() {
+            let _ = hist_repo.finish(
                 &history_id,
                 "success",
                 Some(bytes_transferred),
                 Some(skills_count),
                 None,
-            )?;
-            prov_repo.record_last_sync(&provider.id, "success", None)?;
-            AuditRepository::new(conn).log(
+            );
+            let _ = prov_repo.record_last_sync(&provider.id, "success", None);
+            let _ = audit.log(
                 &format!("sync_{}", direction.as_str()),
                 &provider.id,
                 Some(format!("skills={skills_count} bytes={bytes_transferred}")),
                 true,
                 None,
-            )?;
-        }
-        Err(e) => {
-            let cancelled = is_cancelled(&e);
+            );
+        } else if let Err(ref e) = result {
+            let cancelled = is_cancelled(e);
             let status = if cancelled { "cancelled" } else { "error" };
             let msg = if cancelled { String::new() } else { e.to_string() };
             let bytes_to_record = if cancelled { None } else { Some(bytes_transferred) };
@@ -167,7 +177,7 @@ where
                 if cancelled { None } else { Some(msg.as_str()) },
             );
             if !cancelled {
-                let _ = AuditRepository::new(conn).log(
+                let _ = audit.log(
                     &format!("sync_{}", direction.as_str()),
                     &provider.id,
                     Some(msg.clone()),
@@ -175,16 +185,20 @@ where
                     Some(msg.clone()),
                 );
             }
-            return Err(e);
         }
     }
 
-    let final_history = SyncHistoryRepository::new(conn)
-        .list_for_provider(&provider.id, 1)?
-        .into_iter()
-        .find(|h| h.id == history_id)
-        .unwrap_or(outcome.history.clone());
+    // Re-read the just-finished history row (short lock).
+    let final_history = {
+        SyncHistoryRepository::new(conn)
+            .list_for_provider(&provider.id, 1)?
+            .into_iter()
+            .find(|h| h.id == history_id)
+            .unwrap_or(outcome.history.clone())
+    };
     outcome.history = final_history;
+
+    result?;
     Ok(outcome)
 }
 
@@ -230,6 +244,7 @@ mod tests {
     struct MockProvider {
         upload_count: Arc<Mutex<usize>>,
         fail_next: bool,
+        download_bytes: Vec<u8>,
     }
 
     impl MockProvider {
@@ -237,6 +252,14 @@ mod tests {
             Self {
                 upload_count: Arc::new(Mutex::new(0)),
                 fail_next: false,
+                download_bytes: vec![],
+            }
+        }
+        fn with_download(bytes: Vec<u8>) -> Self {
+            Self {
+                upload_count: Arc::new(Mutex::new(0)),
+                fail_next: false,
+                download_bytes: bytes,
             }
         }
     }
@@ -253,7 +276,7 @@ mod tests {
             Ok(())
         }
         fn download_latest(&self) -> Result<(Vec<u8>, String), AppError> {
-            Ok((vec![], "x.zip.enc".into()))
+            Ok((self.download_bytes.clone(), "download.zip.enc".into()))
         }
         fn list_remote(&self) -> Result<Vec<RemoteFile>, AppError> {
             Ok(vec![])
@@ -280,7 +303,7 @@ mod tests {
 
         let outcome = run_sync_by_id(
             &db,
-            &prov.id,
+            &prov,
             SyncDirection::Upload,
             "secret",
             &lib.path().to_path_buf(),
@@ -306,7 +329,7 @@ mod tests {
 
         let err = run_sync_by_id(
             &db,
-            &prov.id,
+            &prov,
             SyncDirection::Upload,
             "secret",
             &lib.path().to_path_buf(),
@@ -329,7 +352,7 @@ mod tests {
             .unwrap();
         let err = run_sync_by_id(
             &db,
-            &prov.id,
+            &prov,
             SyncDirection::Upload,
             "",
             &lib.path().to_path_buf(),
@@ -337,22 +360,6 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("password"), "got: {err}");
-    }
-
-    #[test]
-    fn test_engine_unknown_provider_id_errors() {
-        let db = make_db();
-        let lib = TempDir::new().unwrap();
-        let err = run_sync_by_id(
-            &db,
-            "nope",
-            SyncDirection::Upload,
-            "secret",
-            &lib.path().to_path_buf(),
-            |_| Ok(MockProvider::new()),
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("not found"), "got: {err}");
     }
 
     #[test]
@@ -364,7 +371,7 @@ mod tests {
             .unwrap();
         let err = run_sync_by_id(
             &db,
-            &prov.id,
+            &prov,
             SyncDirection::Upload,
             "secret",
             &lib.path().to_path_buf(),
@@ -372,5 +379,43 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("factory failed"), "got: {err}");
+    }
+
+    /// P0 gap fix: Download direction was 0-covered. Verifies the
+    /// engine correctly stages the archive to disk, calls
+    /// extract_archive, and writes a success history row.
+    #[test]
+    fn test_engine_download_writes_staged_path_and_history() {
+        let db = make_db();
+        let lib = TempDir::new().unwrap();
+        let skill_dir = lib.path().join("alpha");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# alpha").unwrap();
+        seed_skill(&db, "s1", "alpha", &skill_dir);
+
+        // Pre-build a valid encrypted archive with the test password.
+        let pre_built = crate::core::sync::archive::build_archive(&db, "secret").unwrap();
+
+        let prov = SyncProvidersRepository::new(&db)
+            .create("p1", "mock", "{}", true)
+            .unwrap();
+        let download_bytes = pre_built.bytes.clone();
+        let mock = MockProvider::with_download(download_bytes);
+
+        let outcome = run_sync_by_id(
+            &db,
+            &prov,
+            SyncDirection::Download,
+            "secret",
+            &lib.path().to_path_buf(),
+            |_| Ok(mock),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.history.status, "success");
+        assert_eq!(outcome.history.skills_count, Some(1));
+        assert!(outcome.staged_path.is_some());
+        let staged = outcome.staged_path.unwrap();
+        assert!(staged.exists());
     }
 }

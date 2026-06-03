@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { Tag } from '@/types';
 
 function isTauriEnv(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -218,6 +219,194 @@ const MOCK_COMMANDS: Record<string, (args?: Record<string, unknown>) => unknown>
   import_project_skill: () => '/mock/library/imported-skill',
   export_skill_to_project: () => undefined,
 };
+
+// ── Tag Mocks (browser-only, persistent across invocations) ────────
+// 内存 state 跨命令持久化，方便浏览器模式下做交互联调。
+let mockTagSeq = 0;
+const mockTags: Tag[] = [
+  { id: 't-rust', name: 'rust', color: '#dea584', description: 'Rust lang skills', created_at: '2024-01-01T00:00:00Z' },
+  { id: 't-frontend', name: 'frontend', color: '#3b82f6', description: null, created_at: '2024-01-02T00:00:00Z' },
+];
+const mockSkillTagLinks: Array<{ skill_id: string; tag_id: string }> = [
+  { skill_id: 's1', tag_id: 't-rust' },
+];
+
+const MOCK_TAG_COMMANDS: Record<string, (args?: Record<string, unknown>) => unknown> = {
+  list_tags: () => mockTags.slice().sort((a, b) => a.name.localeCompare(b.name)),
+  create_tag: (args) => {
+    const a = args as { name: string; color?: string | null; description?: string | null };
+    if (mockTags.some((t) => t.name === a.name)) {
+      throw new Error(`Tag already exists: ${a.name}`);
+    }
+    mockTagSeq += 1;
+    const tag: Tag = {
+      id: `t-mock-${mockTagSeq}`,
+      name: a.name,
+      color: a.color ?? null,
+      description: a.description ?? null,
+      created_at: new Date().toISOString(),
+    };
+    mockTags.push(tag);
+    return tag;
+  },
+  update_tag: (args) => {
+    const a = args as { id: string; name?: string | null; color?: string | null; description?: string | null };
+    const tag = mockTags.find((t) => t.id === a.id);
+    if (!tag) throw new Error(`Tag not found: ${a.id}`);
+    if (a.name !== null && a.name !== undefined) tag.name = a.name;
+    if (a.color !== null && a.color !== undefined) tag.color = a.color;
+    if (a.description !== null && a.description !== undefined) tag.description = a.description || null;
+  },
+  delete_tag: (args) => {
+    const a = args as { id: string };
+    const idx = mockTags.findIndex((t) => t.id === a.id);
+    if (idx >= 0) mockTags.splice(idx, 1);
+    for (let i = mockSkillTagLinks.length - 1; i >= 0; i--) {
+      if (mockSkillTagLinks[i].tag_id === a.id) mockSkillTagLinks.splice(i, 1);
+    }
+  },
+  attach_tag: (args) => {
+    const a = args as { skillId: string; tagId: string };
+    if (!mockSkillTagLinks.some((l) => l.skill_id === a.skillId && l.tag_id === a.tagId)) {
+      mockSkillTagLinks.push({ skill_id: a.skillId, tag_id: a.tagId });
+    }
+  },
+  detach_tag: (args) => {
+    const a = args as { skillId: string; tagId: string };
+    for (let i = mockSkillTagLinks.length - 1; i >= 0; i--) {
+      if (mockSkillTagLinks[i].skill_id === a.skillId && mockSkillTagLinks[i].tag_id === a.tagId) {
+        mockSkillTagLinks.splice(i, 1);
+      }
+    }
+  },
+  bulk_attach_tag: (args) => {
+    const a = args as { skillIds: string[]; tagId: string };
+    for (const skillId of a.skillIds) {
+      if (!mockSkillTagLinks.some((l) => l.skill_id === skillId && l.tag_id === a.tagId)) {
+        mockSkillTagLinks.push({ skill_id: skillId, tag_id: a.tagId });
+      }
+    }
+  },
+  get_skill_tags: (args) => {
+    const a = args as { skillId: string };
+    return mockTags.filter((t) => mockSkillTagLinks.some((l) => l.skill_id === a.skillId && l.tag_id === t.id));
+  },
+  get_all_skill_tags: () =>
+    mockSkillTagLinks
+      .map((l) => {
+        const tag = mockTags.find((t) => t.id === l.tag_id);
+        return tag ? ([l.skill_id, tag] as [string, Tag]) : null;
+      })
+      .filter((x): x is [string, Tag] => x !== null),
+};
+
+// 把 tag mocks 合并到主 MOCK_COMMANDS 里。
+for (const [cmd, handler] of Object.entries(MOCK_TAG_COMMANDS)) {
+  MOCK_COMMANDS[cmd] = handler;
+}
+
+// ── Cloud sync mocks (browser mode) ────────────────────────────────
+// In-memory fixtures so `npm run dev` works without Tauri.
+
+const MOCK_SYNC_PROVIDERS: Array<{
+  id: string;
+  name: string;
+  kind: string;
+  config_json: string;
+  enabled: boolean;
+  last_sync_at: string | null;
+  last_sync_status: string | null;
+  last_sync_error: string | null;
+  created_at: string;
+}> = [];
+
+const MOCK_SYNC_HISTORY: Array<{
+  id: string;
+  provider_id: string;
+  direction: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  bytes_transferred: number | null;
+  skills_count: number | null;
+  error_message: string | null;
+}> = [];
+
+const MOCK_SYNC_COMMANDS: Record<string, (args?: Record<string, unknown>) => unknown> = {
+  list_sync_providers: () => MOCK_SYNC_PROVIDERS.slice(),
+  create_sync_provider: (args) => {
+    const id = crypto.randomUUID();
+    const provider = {
+      id,
+      name: String(args?.name ?? ''),
+      kind: String(args?.kind ?? ''),
+      config_json: String(args?.configJson ?? '{}'),
+      enabled: true,
+      last_sync_at: null,
+      last_sync_status: null,
+      last_sync_error: null,
+      created_at: new Date().toISOString(),
+    };
+    MOCK_SYNC_PROVIDERS.push(provider);
+    return provider;
+  },
+  update_sync_provider: (args) => {
+    const id = String(args?.id ?? '');
+    const provider = MOCK_SYNC_PROVIDERS.find((p) => p.id === id);
+    if (!provider) throw new Error(`Provider ${id} not found`);
+    if (typeof args?.name === 'string') provider.name = args.name;
+    if (typeof args?.configJson === 'string') provider.config_json = args.configJson;
+    if (typeof args?.enabled === 'boolean') provider.enabled = args.enabled;
+    return undefined;
+  },
+  delete_sync_provider: (args) => {
+    const id = String(args?.id ?? '');
+    const idx = MOCK_SYNC_PROVIDERS.findIndex((p) => p.id === id);
+    if (idx < 0) throw new Error(`Provider ${id} not found`);
+    MOCK_SYNC_PROVIDERS.splice(idx, 1);
+    // Cascade: drop history rows for this provider.
+    for (let i = MOCK_SYNC_HISTORY.length - 1; i >= 0; i--) {
+      if (MOCK_SYNC_HISTORY[i].provider_id === id) MOCK_SYNC_HISTORY.splice(i, 1);
+    }
+    return undefined;
+  },
+  get_sync_history: (args) => {
+    const pid = String(args?.providerId ?? '');
+    const limit = Number(args?.limit ?? 20);
+    return MOCK_SYNC_HISTORY
+      .filter((h) => h.provider_id === pid)
+      .sort((a, b) => b.started_at.localeCompare(a.started_at))
+      .slice(0, limit);
+  },
+  get_all_sync_history: (args) => {
+    const limit = Number(args?.limit ?? 20);
+    return MOCK_SYNC_HISTORY
+      .slice()
+      .sort((a, b) => b.started_at.localeCompare(a.started_at))
+      .slice(0, limit);
+  },
+  test_sync_provider_connection: () => undefined,
+  sync_now: (args) => {
+    const pid = String(args?.providerId ?? '');
+    const history = {
+      id: crypto.randomUUID(),
+      provider_id: pid,
+      direction: String(args?.direction ?? 'upload'),
+      status: 'success',
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+      bytes_transferred: 0,
+      skills_count: 0,
+      error_message: null,
+    };
+    MOCK_SYNC_HISTORY.push(history);
+    return history;
+  },
+};
+
+for (const [cmd, handler] of Object.entries(MOCK_SYNC_COMMANDS)) {
+  MOCK_COMMANDS[cmd] = handler;
+}
 
 function logToBackend(level: string, message: string, source: string): void {
   if (isTauriEnv()) {

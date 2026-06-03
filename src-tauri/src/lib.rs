@@ -18,7 +18,11 @@ pub struct AppState {
     pub library: Mutex<SkillLibrary>,
     pub audit_log: Mutex<AuditLog>,
     pub logs: Mutex<Vec<LogEntry>>,
-    pub database: Mutex<Database>,
+    // `Arc<Database>` so the sync engine can hold a clone while doing
+    // long provider IO (git push / WebDAV PUT) without pinning the
+    // connection mutex — the engine uses `Database::connection()` per
+    // call to take a short lock around DB writes.
+    pub database: Arc<Database>,
     pub cancel_registry: Arc<InstallCancelRegistry>,
 }
 
@@ -82,7 +86,7 @@ pub fn run() {
                 library: Mutex::new(library),
                 audit_log: Mutex::new(audit_log),
                 logs: Mutex::new(Vec::new()),
-                database: Mutex::new(database),
+                database: Arc::new(database),
                 cancel_registry: Arc::new(InstallCancelRegistry::new()),
             }));
 

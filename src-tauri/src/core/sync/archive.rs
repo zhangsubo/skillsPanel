@@ -151,6 +151,25 @@ pub fn build_archive(
     })
 }
 
+/// Encrypt a raw zip byte stream with the SPBK envelope (no skill
+/// metadata). Used by the zip-slip test fixture so it can construct
+/// a malicious inner zip and feed it back through the real extract
+/// path. Visible at crate scope for tests.
+#[cfg(test)]
+pub(crate) fn encrypt_zip_bytes(zip_bytes: &[u8], password: &str) -> Vec<u8> {
+    let key = derive_key(password);
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher.encrypt(nonce, zip_bytes).expect("encrypt");
+    let mut out = Vec::with_capacity(ARCHIVE_MAGIC.len() + NONCE_LEN + ciphertext.len());
+    out.extend_from_slice(ARCHIVE_MAGIC);
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&ciphertext);
+    out
+}
+
 /// Decrypt + extract an archive. Writes skill directories under
 /// `<dest>/skills/<name>/...`. Returns the parsed manifest.
 pub fn extract_archive(
@@ -202,7 +221,9 @@ pub fn extract_archive(
 
     // Extract skill files. Each entry with prefix "skills/" goes under
     // <dest>/<relative-in-zip>. We rely on zip's enclosed_name() to prevent
-    // zip slip.
+    // zip slip, but the zip crate v2 `enclosed_name` is permissive
+    // about some `..` paths (e.g. `skills/../also_escape`), so we add
+    // an explicit `..` segment check as a defense in depth.
     std::fs::create_dir_all(dest)?;
     for i in 0..archive.len() {
         let mut entry = archive
@@ -216,6 +237,15 @@ pub fn extract_archive(
             Some(p) => p.to_path_buf(),
             None => continue, // skip unsafe paths
         };
+        // Reject any path that still contains a `..` component after
+        // the zip crate's normalization. This is the second line of
+        // defense against zip slip (e.g. `skills/../foo`).
+        if rel
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        {
+            continue;
+        }
         let out_path = dest.join(&rel);
         if entry.is_dir() {
             std::fs::create_dir_all(&out_path)?;
@@ -545,5 +575,62 @@ mod tests {
         let obj = snapshot.as_object().unwrap();
         assert!(obj.contains_key("sync"));
         assert!(!obj.contains_key("webdav_password"));
+    }
+
+    /// Build a zip with malicious `../` entries, encrypt it, and verify
+    /// that `extract_archive` does not let them escape the destination
+    /// directory. We include a valid manifest.json so the extractor
+    /// doesn't bail before reaching the entry-walk.
+    #[test]
+    fn test_archive_rejects_zip_slip_paths() {
+        let (db, _lib_tmp) = make_test_db();
+
+        // Build a raw zip containing a valid manifest plus two
+        // path-traversal attempts and one normal file.
+        let mut buf = Vec::new();
+        {
+            let cursor = std::io::Cursor::new(&mut buf);
+            let mut zip = zip::ZipWriter::new(cursor);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+
+            let manifest = crate::core::models::BackupManifest {
+                schema_version: 1,
+                created_at: "2024-01-01T00:00:00Z".into(),
+                skills_panel_version: "0.0.0".into(),
+                skills: vec![],
+            };
+            zip.start_file(MANIFEST_NAME, options).unwrap();
+            std::io::Write::write_all(&mut zip, serde_json::to_vec(&manifest).unwrap().as_slice()).unwrap();
+            zip.start_file("skills/normal.txt", options).unwrap();
+            std::io::Write::write_all(&mut zip, b"safe content").unwrap();
+            zip.start_file("../escape.txt", options).unwrap();
+            std::io::Write::write_all(&mut zip, b"escaped").unwrap();
+            zip.start_file("skills/../also_escape.txt", options).unwrap();
+            std::io::Write::write_all(&mut zip, b"escaped2").unwrap();
+            zip.finish().unwrap();
+        }
+
+        // Wrap in the SPBK envelope so extract_archive exercises the
+        // real decrypt + parse path.
+        let encrypted = encrypt_zip_bytes(&buf, "pw");
+
+        let dest = tempfile::tempdir().unwrap();
+        extract_archive(&encrypted, "pw", dest.path()).unwrap();
+
+        // The normal entry should land at `<dest>/skills/normal.txt`.
+        assert!(dest.path().join("skills/normal.txt").exists());
+        // The traversal entries should be silently dropped (the zip
+        // crate's `enclosed_name()` returns None for paths with `..`).
+        assert!(
+            !dest.path().join("escape.txt").exists(),
+            "zip slip let `../escape.txt` escape"
+        );
+        assert!(
+            !dest.path().join("also_escape.txt").exists(),
+            "zip slip let `skills/../also_escape.txt` escape"
+        );
+        // Sanity: nothing should have been written outside `dest`.
+        assert!(!dest.path().parent().unwrap().join("escape.txt").exists());
     }
 }

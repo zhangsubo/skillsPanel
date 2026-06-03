@@ -32,7 +32,7 @@ pub fn get_config(state: State<'_, SharedState>) -> Result<String, AppError> {
 pub fn update_config(state: State<'_, SharedState>, config_json: String) -> Result<(), AppError> {
     let state = state.lock().unwrap();
     let mut config = state.config.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let new_config: AppConfig =
         serde_json::from_str(&config_json).map_err(|e| AppError::Config(e.to_string()))?;
 
@@ -84,7 +84,7 @@ pub fn scan_skills(state: State<'_, SharedState>) -> Result<ScanResult, AppError
     let state = state.lock().unwrap();
     let config = state.config.lock().unwrap();
     let library = state.library.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
 
     let scan_timestamp = chrono::Utc::now().to_rfc3339();
     let skills = crate::core::scanner::Scanner::scan_sources(&config, &library)?;
@@ -138,7 +138,7 @@ pub fn get_scan_diff(
     state: State<'_, SharedState>,
 ) -> Result<crate::core::scan_db::ScanDiff, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
 
     let scan_timestamp = chrono::Utc::now().to_rfc3339();
     let skills_repo = crate::core::database::SkillsRepository::new(&database);
@@ -217,7 +217,7 @@ pub fn install_local_skill(
 
     let state = state.lock().unwrap();
     let library = state.library.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
 
     let path = std::path::Path::new(&source_path);
     let source = if path.is_file() && SkillEngine::is_zip_file(path) {
@@ -287,7 +287,7 @@ pub fn install_git_skill(
     );
 
     let library = state.library.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
 
     // When no subpath specified, try installing all skills at once
     if subpath.is_none() {
@@ -396,7 +396,7 @@ pub fn link_skill(
     let state = state.lock().unwrap();
     let library = state.library.lock().unwrap();
     let config = state.config.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let tool = find_tool(&config, &tool_id)?;
     let tool_dir = tool.expanded_path();
     let skill_path = library.skill_path(&skill_name);
@@ -456,7 +456,7 @@ pub fn unlink_skill(
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
     let config = state.config.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let tool = find_tool(&config, &tool_id)?;
     crate::core::linker::Linker::unlink(&tool.expanded_path(), &skill_name)?;
 
@@ -623,7 +623,7 @@ pub fn batch_delete_skills(
     let state = state.lock().unwrap();
     let library = state.library.lock().unwrap();
     let config = state.config.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let db_repo = crate::core::database::SkillsRepository::new(&database);
     let mut count = 0;
     for name in &skill_names {
@@ -691,7 +691,7 @@ pub fn delete_skill(
     let state = state.lock().unwrap();
     let library = state.library.lock().unwrap();
     let config = state.config.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
 
     for tool in &config.tools {
         let _ = crate::core::linker::Linker::unlink(&tool.expanded_path(), &skill_name);
@@ -743,7 +743,7 @@ pub fn get_audit_logs(
     limit: Option<usize>,
 ) -> Result<Vec<AuditEntry>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::AuditRepository::new(&database);
     repo.get_logs(limit.unwrap_or(100))
 }
@@ -756,7 +756,7 @@ pub fn log_message(
     source: String,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::AppLogsRepository::new(&database);
     repo.log(&level, &message, &source)?;
 
@@ -785,7 +785,7 @@ pub fn get_app_logs(
     limit: Option<usize>,
 ) -> Result<Vec<crate::core::models::LogEntry>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::AppLogsRepository::new(&database);
     repo.get_logs(limit.unwrap_or(100))
 }
@@ -816,7 +816,7 @@ fn create_minimal_skill(name: &str, path: &std::path::Path) -> Skill {
 #[tauri::command]
 pub fn get_installed_skills_from_db(state: State<'_, SharedState>) -> Result<Vec<Skill>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::SkillsRepository::new(&database);
     repo.get_installed()
 }
@@ -826,7 +826,7 @@ pub fn get_all_active_skills_from_db(
     state: State<'_, SharedState>,
 ) -> Result<Vec<Skill>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::SkillsRepository::new(&database);
     repo.get_all_active()
 }
@@ -837,7 +837,7 @@ pub fn mark_skill_installed(
     skill_id: String,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::SkillsRepository::new(&database);
     repo.mark_installed(&skill_id)
 }
@@ -848,7 +848,7 @@ pub fn mark_skill_uninstalled(
     skill_name: String,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::SkillsRepository::new(&database);
     repo.mark_uninstalled(&skill_name)
 }
@@ -856,7 +856,7 @@ pub fn mark_skill_uninstalled(
 #[tauri::command]
 pub fn upsert_skill_to_db(state: State<'_, SharedState>, skill: Skill) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::SkillsRepository::new(&database);
     repo.upsert(&skill)
 }
@@ -867,7 +867,7 @@ pub fn get_config_value(
     key: String,
 ) -> Result<Option<String>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::ConfigRepository::new(&database);
     repo.get(&key)
 }
@@ -879,7 +879,7 @@ pub fn set_config_value(
     value: String,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::ConfigRepository::new(&database);
     repo.set(&key, &value)
 }
@@ -890,7 +890,7 @@ pub fn get_audit_logs_from_db(
     limit: Option<usize>,
 ) -> Result<Vec<AuditEntry>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::AuditRepository::new(&database);
     repo.get_logs(limit.unwrap_or(100))
 }
@@ -905,7 +905,7 @@ pub fn log_audit_entry(
     error: Option<String>,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::AuditRepository::new(&database);
     repo.log(&action, &target, details, success, error)
 }
@@ -916,7 +916,7 @@ pub fn get_app_logs_from_db(
     limit: Option<usize>,
 ) -> Result<Vec<crate::core::models::LogEntry>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::AppLogsRepository::new(&database);
     repo.get_logs(limit.unwrap_or(100))
 }
@@ -929,7 +929,7 @@ pub fn log_app_message(
     source: String,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::AppLogsRepository::new(&database);
     repo.log(&level, &message, &source)
 }
@@ -937,7 +937,7 @@ pub fn log_app_message(
 #[tauri::command]
 pub fn get_tools_from_db(state: State<'_, SharedState>) -> Result<Vec<Tool>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::ToolsRepository::new(&database);
     repo.get_all()
 }
@@ -945,7 +945,7 @@ pub fn get_tools_from_db(state: State<'_, SharedState>) -> Result<Vec<Tool>, App
 #[tauri::command]
 pub fn upsert_tool_to_db(state: State<'_, SharedState>, tool: Tool) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::ToolsRepository::new(&database);
     repo.upsert(&tool)
 }
@@ -957,7 +957,7 @@ pub fn link_tool_skill_in_db(
     skill_id: String,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::LinksRepository::new(&database);
     repo.link(&tool_id, &skill_id)
 }
@@ -969,7 +969,7 @@ pub fn unlink_tool_skill_in_db(
     skill_id: String,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::LinksRepository::new(&database);
     repo.unlink(&tool_id, &skill_id)
 }
@@ -980,7 +980,7 @@ pub fn get_linked_tool_ids(
     skill_id: String,
 ) -> Result<Vec<String>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::LinksRepository::new(&database);
     repo.get_linked_tool_ids(&skill_id)
 }
@@ -997,7 +997,7 @@ pub fn check_skill_update(
     skill_id: String,
 ) -> Result<bool, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
 
     let skills_repo = crate::core::database::SkillsRepository::new(&database);
     let skill = skills_repo
@@ -1011,7 +1011,7 @@ pub fn check_skill_update(
 pub fn update_skill(state: State<'_, SharedState>, skill_id: String) -> Result<String, AppError> {
     let state = state.lock().unwrap();
     let library = state.library.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
 
     let skills_repo = crate::core::database::SkillsRepository::new(&database);
     let skill = skills_repo
@@ -1030,7 +1030,7 @@ pub fn create_project(
     root_path: String,
 ) -> Result<String, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::ProjectsRepository::new(&database);
     let id = uuid::Uuid::new_v4().to_string();
     repo.create(&id, &name, &root_path)?;
@@ -1042,7 +1042,7 @@ pub fn list_projects(
     state: State<'_, SharedState>,
 ) -> Result<Vec<crate::core::models::Project>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::ProjectsRepository::new(&database);
     repo.get_all()
 }
@@ -1050,7 +1050,7 @@ pub fn list_projects(
 #[tauri::command]
 pub fn delete_project(state: State<'_, SharedState>, project_id: String) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let repo = crate::core::database::ProjectsRepository::new(&database);
     repo.delete(&project_id)
 }
@@ -1061,7 +1061,7 @@ pub fn scan_project(
     project_id: String,
 ) -> Result<crate::core::models::ProjectDto, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
 
     let projects_repo = crate::core::database::ProjectsRepository::new(&database);
     let project = projects_repo
@@ -1095,7 +1095,7 @@ pub fn import_project_skill(
     skill_name: String,
 ) -> Result<String, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let library = state.library.lock().unwrap();
 
     let projects_repo = crate::core::database::ProjectsRepository::new(&database);
@@ -1119,7 +1119,7 @@ pub fn export_skill_to_project(
     agent: String,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let library = state.library.lock().unwrap();
 
     let projects_repo = crate::core::database::ProjectsRepository::new(&database);
@@ -1148,7 +1148,7 @@ pub fn get_app_version() -> String {
 #[tauri::command]
 pub fn list_tags(state: State<'_, SharedState>) -> Result<Vec<crate::core::models::Tag>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     crate::core::database::TagsRepository::new(&database).list()
 }
 
@@ -1160,7 +1160,7 @@ pub fn create_tag(
     description: Option<String>,
 ) -> Result<crate::core::models::Tag, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let tag = crate::core::database::TagsRepository::new(&database).create(
         &name,
         color.as_deref(),
@@ -1185,7 +1185,7 @@ pub fn update_tag(
     description: Option<String>,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     crate::core::database::TagsRepository::new(&database).update(
         &id,
         name.as_deref(),
@@ -1205,7 +1205,7 @@ pub fn update_tag(
 #[tauri::command]
 pub fn delete_tag(state: State<'_, SharedState>, id: String) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     crate::core::database::TagsRepository::new(&database).delete(&id)?;
     crate::core::database::AuditRepository::new(&database).log(
         "delete_tag",
@@ -1224,7 +1224,7 @@ pub fn attach_tag(
     tag_id: String,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     crate::core::database::TagsRepository::new(&database).attach(&skill_id, &tag_id)?;
     crate::core::database::AuditRepository::new(&database).log(
         "attach_tag",
@@ -1243,7 +1243,7 @@ pub fn detach_tag(
     tag_id: String,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     crate::core::database::TagsRepository::new(&database).detach(&skill_id, &tag_id)?;
     crate::core::database::AuditRepository::new(&database).log(
         "detach_tag",
@@ -1269,7 +1269,7 @@ pub fn bulk_attach_tag(
         )));
     }
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let refs: Vec<&str> = skill_ids.iter().map(String::as_str).collect();
     let result =
         crate::core::database::TagsRepository::new(&database).bulk_attach(&refs, &tag_id)?;
@@ -1294,7 +1294,7 @@ pub fn get_skill_tags(
     skill_id: String,
 ) -> Result<Vec<crate::core::models::Tag>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     crate::core::database::TagsRepository::new(&database).list_tags_for_skill(&skill_id)
 }
 
@@ -1303,7 +1303,7 @@ pub fn get_all_skill_tags(
     state: State<'_, SharedState>,
 ) -> Result<Vec<(String, crate::core::models::Tag)>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     crate::core::database::TagsRepository::new(&database).list_all_skill_tags()
 }
 
@@ -1321,54 +1321,84 @@ fn fetch_sync_password(database: &crate::core::database::Database) -> Result<Str
         .ok_or_else(|| AppError::Config("Archive password not set. Configure it in Settings.".into()))
 }
 
-fn build_sync_provider(
+/// Snapshot of all credentials a sync needs. Constructed up front from
+/// the database (with the MutexGuard held), then handed to the engine
+/// as plain `String` data so the long sync IO doesn't pin the DB lock.
+#[derive(Default)]
+struct SyncCredentials {
+    // GitHub
+    github_repo: String,
+    github_branch: String,
+    github_token: String,
+    // WebDAV
+    webdav_url: String,
+    webdav_username: String,
+    webdav_password: String,
+    webdav_remote_path: String,
+}
+
+/// Read every credential the engine will need, in one pass, while the
+/// database lock is held. After this returns, the caller MUST drop the
+/// `MutexGuard` before invoking `run_sync_by_id`.
+fn read_sync_credentials(
     database: &crate::core::database::Database,
     provider: &crate::core::models::SyncProvider,
-) -> Result<crate::core::sync::BoxedSyncProvider, AppError> {
-    use crate::core::sync::{GitHubZipProvider, WebDavProvider};
-    let config = crate::core::sync::parse_config_json(&provider.config_json)
+) -> Result<SyncCredentials, AppError> {
+    use crate::core::sync::parse_config_json;
+    let mut creds = SyncCredentials::default();
+    let config = parse_config_json(&provider.config_json)
         .map_err(|e| AppError::Config(format!("Invalid provider config: {e}")))?;
+    let cfg_repo = crate::core::database::ConfigRepository::new(database);
     match provider.kind.as_str() {
         "github_zip" => {
-            let repo = config
+            creds.github_repo = config
                 .get("repo")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| AppError::Config("github_zip provider missing 'repo' field".into()))?
                 .to_string();
-            let branch = config
+            creds.github_branch = config
                 .get("branch")
                 .and_then(|v| v.as_str())
                 .unwrap_or("main")
                 .to_string();
-            // Token is stored separately in `github_token` SENSITIVE_KEY.
-            let token = crate::core::database::ConfigRepository::new(database)
-                .get("github_token")?
-                .unwrap_or_default();
-            Ok(crate::core::sync::BoxedSyncProvider::new(
-                GitHubZipProvider::new(repo, branch, token),
-            ))
+            creds.github_token = cfg_repo.get("github_token")?.unwrap_or_default();
         }
         "webdav" => {
-            let url = config
+            creds.webdav_url = config
                 .get("url")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| AppError::Config("webdav provider missing 'url' field".into()))?
                 .to_string();
-            let remote_path = config
+            creds.webdav_remote_path = config
                 .get("remote_path")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let username = crate::core::database::ConfigRepository::new(database)
-                .get("webdav_username")?
-                .unwrap_or_default();
-            let password = crate::core::database::ConfigRepository::new(database)
-                .get("webdav_password")?
-                .unwrap_or_default();
-            Ok(crate::core::sync::BoxedSyncProvider::new(
-                WebDavProvider::new(url, username, password, remote_path),
-            ))
+            creds.webdav_username = cfg_repo.get("webdav_username")?.unwrap_or_default();
+            creds.webdav_password = cfg_repo.get("webdav_password")?.unwrap_or_default();
         }
+        other => return Err(AppError::Config(format!("Unknown provider kind: {other}"))),
+    }
+    Ok(creds)
+}
+
+fn build_sync_provider(
+    provider: &crate::core::models::SyncProvider,
+    creds: SyncCredentials,
+) -> Result<crate::core::sync::BoxedSyncProvider, AppError> {
+    use crate::core::sync::{GitHubZipProvider, WebDavProvider};
+    match provider.kind.as_str() {
+        "github_zip" => Ok(crate::core::sync::BoxedSyncProvider::new(
+            GitHubZipProvider::new(creds.github_repo, creds.github_branch, creds.github_token),
+        )),
+        "webdav" => Ok(crate::core::sync::BoxedSyncProvider::new(
+            WebDavProvider::new(
+                creds.webdav_url,
+                creds.webdav_username,
+                creds.webdav_password,
+                creds.webdav_remote_path,
+            ),
+        )),
         other => Err(AppError::Config(format!("Unknown provider kind: {other}"))),
     }
 }
@@ -1378,7 +1408,7 @@ pub fn list_sync_providers(
     state: State<'_, SharedState>,
 ) -> Result<Vec<crate::core::models::SyncProvider>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     crate::core::database::SyncProvidersRepository::new(&database).list(false)
 }
 
@@ -1390,7 +1420,7 @@ pub fn create_sync_provider(
     config_json: String,
 ) -> Result<crate::core::models::SyncProvider, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let provider = crate::core::database::SyncProvidersRepository::new(&database)
         .create(&name, &kind, &config_json, true)?;
     crate::core::database::AuditRepository::new(&database).log(
@@ -1412,7 +1442,7 @@ pub fn update_sync_provider(
     enabled: Option<bool>,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     crate::core::database::SyncProvidersRepository::new(&database)
         .update(&id, name.as_deref(), config_json.as_deref(), enabled)?;
     crate::core::database::AuditRepository::new(&database).log(
@@ -1431,7 +1461,7 @@ pub fn delete_sync_provider(
     id: String,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     crate::core::database::SyncProvidersRepository::new(&database).delete(&id)?;
     crate::core::database::AuditRepository::new(&database).log(
         "delete_sync_provider",
@@ -1450,7 +1480,7 @@ pub fn get_sync_history(
     limit: Option<usize>,
 ) -> Result<Vec<crate::core::models::SyncHistory>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let lim = limit.unwrap_or(20);
     crate::core::database::SyncHistoryRepository::new(&database).list_for_provider(&provider_id, lim)
 }
@@ -1461,7 +1491,7 @@ pub fn get_all_sync_history(
     limit: Option<usize>,
 ) -> Result<Vec<crate::core::models::SyncHistory>, AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
+    let database = state.database.clone();
     let lim = limit.unwrap_or(20);
     crate::core::database::SyncHistoryRepository::new(&database).list_recent(lim)
 }
@@ -1472,13 +1502,20 @@ pub fn test_sync_provider_connection(
     provider_id: String,
 ) -> Result<(), AppError> {
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
-    let provider = crate::core::database::SyncProvidersRepository::new(&database)
-        .get(&provider_id)?
-        .ok_or_else(|| AppError::Config(format!("Provider {provider_id} not found")))?;
-    let concrete = build_sync_provider(&database, &provider)?;
+    // Short-lock: fetch the provider row + credentials, then drop the
+    // guard before the network round-trip.
+    let (provider, creds) = {
+        let database = state.database.clone();
+        let provider = crate::core::database::SyncProvidersRepository::new(&database)
+            .get(&provider_id)?
+            .ok_or_else(|| AppError::Config(format!("Provider {provider_id} not found")))?;
+        let creds = read_sync_credentials(&database, &provider)?;
+        (provider, creds)
+    };
+    let concrete = build_sync_provider(&provider, creds)?;
     concrete.test_connection()?;
-    crate::core::database::AuditRepository::new(&database).log(
+    let g = state.database.clone();
+    crate::core::database::AuditRepository::new(&g).log(
         "test_sync_provider_connection",
         &provider_id,
         None,
@@ -1497,23 +1534,42 @@ pub fn sync_now(
     use crate::core::sync::{run_sync_by_id, SyncDirection};
 
     let state = state.lock().unwrap();
-    let database = state.database.lock().unwrap();
     let direction = SyncDirection::parse(&direction)?;
-    let password = fetch_sync_password(&database)?;
-    let library_path = {
-        let cfg = crate::core::database::ConfigRepository::new(&database);
-        cfg.get("library_path")?
-            .ok_or_else(|| AppError::Config("library_path not configured".into()))
-            .map(std::path::PathBuf::from)?
+
+    // Phase 1: with the DB lock held, fetch the provider row, the
+    // archive password, the library path, and all credentials. After
+    // this block, the MutexGuard is dropped so the long-running sync
+    // IO doesn't block the rest of the app.
+    let (provider, password, library_path, creds) = {
+        let database = state.database.clone();
+        let provider = crate::core::database::SyncProvidersRepository::new(&database)
+            .get(&provider_id)?
+            .ok_or_else(|| AppError::Config(format!("Provider {provider_id} not found")))?;
+        let password = fetch_sync_password(&database)?;
+        let library_path = {
+            let cfg = crate::core::database::ConfigRepository::new(&database);
+            cfg.get("library_path")?
+                .ok_or_else(|| AppError::Config("library_path not configured".into()))
+                .map(std::path::PathBuf::from)?
+        };
+        let creds = read_sync_credentials(&database, &provider)?;
+        (provider, password, library_path, creds)
     };
-    let outcome = run_sync_by_id(
-        &database,
-        &provider_id,
-        direction,
-        &password,
-        &library_path,
-        |db_provider| build_sync_provider(&database, db_provider),
-    )?;
+
+    // Phase 2: build the concrete provider (no DB access) and run sync.
+    // We re-acquire the DB lock briefly inside the engine (per write);
+    // the long provider IO does not hold it.
+    let outcome = {
+        let database = state.database.clone();
+        crate::core::sync::run_sync_by_id(
+            &database,
+            &provider,
+            direction,
+            &password,
+            &library_path,
+            |db_provider| build_sync_provider(db_provider, creds),
+        )?
+    };
     Ok(outcome.history)
 }
 

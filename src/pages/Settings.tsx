@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSync } from '@/hooks/use-sync'
+import { invokeCommand } from '@/api'
 import { getVersion } from '@tauri-apps/api/app'
 import { checkForUpdate } from '@/api/version'
 import UpdateDialog from '@/components/UpdateDialog'
@@ -52,6 +54,9 @@ export default function Settings() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const sync = useSync()
+  const [archivePassword, setArchivePassword] = useState('')
+  const [showAddProvider, setShowAddProvider] = useState(false)
 
   const [showAddTool, setShowAddTool] = useState(false)
   const [newToolName, setNewToolName] = useState('')
@@ -426,6 +431,156 @@ export default function Settings() {
       </Card>
 
       <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <div>
+            <CardTitle className="text-base">{t('sync.title')}</CardTitle>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t('sync.subtitle')}</p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowAddProvider(true)}
+            data-testid="sync-add-provider-btn"
+          >
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            {t('sync.addProvider')}
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {/* Archive password (encrypted via SENSITIVE_KEYS) */}
+          <div className="mb-4 rounded-lg border p-3">
+            <label className="text-sm font-medium">
+              {t('sync.archivePassword')}
+            </label>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t('sync.archivePasswordHint')}
+            </p>
+            <div className="mt-2 flex gap-2">
+              <Input
+                type="password"
+                value={archivePassword}
+                onChange={(e) => setArchivePassword(e.target.value)}
+                placeholder="••••••"
+                className="flex-1"
+                data-testid="sync-archive-password-input"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!archivePassword.trim()}
+                onClick={async () => {
+                  try {
+                    await invokeCommand('set_config_value', {
+                      key: 'backup_archive_password',
+                      value: archivePassword,
+                    });
+                  } catch (e) {
+                    console.error(e);
+                  }
+                }}
+              >
+                {t('sync.setPassword')}
+              </Button>
+            </div>
+          </div>
+
+          {sync.error && (
+            <p className="mb-2 text-xs text-destructive">{sync.error.message}</p>
+          )}
+
+          {sync.providers.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">
+              {t('sync.noProviders')}
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {sync.providers.map((p) => (
+                <div
+                  key={p.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border p-3"
+                  data-testid={`sync-provider-row-${p.id}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{p.name}</span>
+                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                        {p.kind}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {t('sync.lastSync')}: {p.last_sync_at ?? t('sync.neverSynced')}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={sync.loading}
+                      onClick={() => sync.testConnection(p.id).catch(() => {})}
+                    >
+                      {t('sync.testConnection')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={sync.loading}
+                      onClick={() => sync.syncUp(p.id).catch(() => {})}
+                      data-testid={`sync-up-btn-${p.id}`}
+                    >
+                      {t('sync.syncUp')}
+                    </Button>
+                    <button
+                      type="button"
+                      aria-label={t('sync.deleteProvider')}
+                      onClick={() => {
+                        if (window.confirm(t('sync.confirmDelete'))) {
+                          void sync.remove(p.id);
+                        }
+                      }}
+                      className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Recent history — last 5 across all providers */}
+          {sync.history.length > 0 && (
+            <div className="mt-4 border-t pt-3">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
+                {t('sync.history')}
+              </p>
+              <div className="space-y-1">
+                {sync.history.slice(0, 5).map((h) => (
+                  <div
+                    key={h.id}
+                    className="flex items-center justify-between text-xs"
+                  >
+                    <span className="text-muted-foreground">
+                      {h.started_at} · {h.direction} · {h.provider_id.slice(0, 8)}
+                    </span>
+                    <span
+                      className={
+                        h.status === 'success'
+                          ? 'text-green-600'
+                          : h.status === 'cancelled'
+                            ? 'text-muted-foreground'
+                            : 'text-destructive'
+                      }
+                    >
+                      {h.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">{t('settings.updateCheck')}</CardTitle>
           <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.updateCheckDesc')}</p>
@@ -539,6 +694,185 @@ export default function Settings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={showAddProvider} onOpenChange={(open) => !open && setShowAddProvider(false)}>
+        <AddSyncProviderDialog
+          onClose={() => setShowAddProvider(false)}
+          onCreate={async (name, kind, configJson) => {
+            try {
+              await sync.create(name, kind, configJson);
+              setShowAddProvider(false);
+            } catch (e) {
+              console.error(e);
+            }
+          }}
+        />
+      </Dialog>
     </div>
   )
+}
+
+/**
+ * Minimal "add provider" dialog. Renders kind-specific fields inline
+ * (GitHub: repo+branch; WebDAV: url+username+password+remote_path).
+ * Config is JSON-encoded before being passed to the backend.
+ */
+function AddSyncProviderDialog({
+  onClose,
+  onCreate,
+}: {
+  onClose: () => void;
+  onCreate: (name: string, kind: 'github_zip' | 'webdav', configJson: string) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [name, setName] = useState('');
+  const [kind, setKind] = useState<'github_zip' | 'webdav'>('webdav');
+  const [repo, setRepo] = useState('');
+  const [branch, setBranch] = useState('main');
+  const [url, setUrl] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [remotePath, setRemotePath] = useState('backups');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      // Credentials go to SENSITIVE_KEYS (encrypted in DB) — config_json
+      // holds only the non-secret metadata. This keeps the on-disk record
+      // clean and ensures `build_sync_provider` always reads fresh creds
+      // from the encrypted store rather than from a stale config_json blob.
+      if (kind === 'webdav') {
+        if (username) {
+          await invokeCommand('set_config_value', {
+            key: 'webdav_username',
+            value: username,
+          });
+        }
+        if (password) {
+          await invokeCommand('set_config_value', {
+            key: 'webdav_password',
+            value: password,
+          });
+        }
+      }
+      const configJson =
+        kind === 'github_zip'
+          ? JSON.stringify({ repo, branch })
+          : JSON.stringify({ url, remote_path: remotePath });
+      await onCreate(name.trim(), kind, configJson);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>{t('sync.addProvider')}</DialogTitle>
+        <DialogDescription>{t('sync.subtitle')}</DialogDescription>
+      </DialogHeader>
+      <div className="space-y-3">
+        <div>
+          <label className="text-sm text-muted-foreground">Name</label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="personal-nextcloud" />
+        </div>
+        <div>
+          <label className="text-sm text-muted-foreground">Kind</label>
+          <div className="mt-1 flex gap-2">
+            <Button
+              type="button"
+              variant={kind === 'webdav' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setKind('webdav')}
+            >
+              {t('sync.kind.webdav')}
+            </Button>
+            <Button
+              type="button"
+              variant={kind === 'github_zip' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setKind('github_zip')}
+            >
+              {t('sync.kind.githubZip')}
+            </Button>
+          </div>
+        </div>
+        {kind === 'github_zip' ? (
+          <>
+            <div>
+              <label className="text-sm text-muted-foreground">{t('sync.fields.repo')}</label>
+              <Input
+                value={repo}
+                onChange={(e) => setRepo(e.target.value)}
+                placeholder={t('sync.fields.repoPlaceholder')}
+              />
+            </div>
+            <div>
+              <label className="text-sm text-muted-foreground">{t('sync.fields.branch')}</label>
+              <Input
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+                placeholder={t('sync.fields.branchPlaceholder')}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <label className="text-sm text-muted-foreground">{t('sync.fields.url')}</label>
+              <Input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder={t('sync.fields.urlPlaceholder')}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-sm text-muted-foreground">{t('sync.fields.username')}</label>
+                <Input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-muted-foreground">{t('sync.fields.password')}</label>
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-sm text-muted-foreground">{t('sync.fields.remotePath')}</label>
+              <Input
+                value={remotePath}
+                onChange={(e) => setRemotePath(e.target.value)}
+                placeholder={t('sync.fields.remotePathPlaceholder')}
+              />
+            </div>
+          </>
+        )}
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose}>
+          {t('library.cancel')}
+        </Button>
+        <Button
+          onClick={submit}
+          disabled={busy || !name.trim() || (kind === 'github_zip' ? !repo.trim() : !url.trim())}
+        >
+          {t('sync.addProvider')}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  );
 }

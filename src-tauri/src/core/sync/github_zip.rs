@@ -55,19 +55,15 @@ impl GitHubZipProvider {
     }
 
     fn clone_url(&self) -> String {
-        // For local bare (file://), use the path directly. The leading
-        // "file://" is required for git2 to treat it as a URL.
+        // SECURITY: never put the token in the URL. libgit2 writes the URL
+        // to `.git/config` for each clone, and a leaked tempdir with
+        // credentials is a long-lived attack surface. Auth is injected
+        // via RemoteCallbacks::credentials at fetch/push time instead.
         if self.local_bare.is_some() {
             let path = self.local_bare.as_ref().unwrap();
             format!("file://{}", path.to_string_lossy())
-        } else if self.token.is_empty() {
-            // Public read-only fallback. Real uploads require a token.
-            format!("https://github.com/{}.git", self.repo)
         } else {
-            // Token in URL is the simplest way to authenticate with libgit2's
-            // HTTP transport without depending on the system credential helper.
-            // We never log this URL; callers must avoid persisting it.
-            format!("https://x-access-token:{}@github.com/{}.git", self.token, self.repo)
+            format!("https://github.com/{}.git", self.repo)
         }
     }
 }
@@ -138,7 +134,7 @@ impl SyncProvider for GitHubZipProvider {
                 .map_err(|e| AppError::Config(format!("write README: {e}")))?;
         }
 
-        commit_and_push(&repo, &self.branch, filename)?;
+        commit_and_push(&repo, &self.branch, filename, &self.token)?;
         Ok(())
     }
 
@@ -296,14 +292,19 @@ fn ensure_dir_in_workdir(repo: &Repository, rel: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-fn commit_and_push(repo: &Repository, branch: &str, hint: &str) -> Result<(), AppError> {
+fn commit_and_push(
+    repo: &Repository,
+    branch: &str,
+    hint: &str,
+    token: &str,
+) -> Result<(), AppError> {
     // Re-fetch the remote ref so we know what the tip is BEFORE we try to
     // push. Without this, the second sync run on the same provider can fail
     // with "non-fastforwardable" because the local clone's branch ref is
     // stale relative to the remote.
     if let Ok(mut remote) = repo.find_remote("origin") {
         let mut fo = FetchOptions::new();
-        fo.remote_callbacks(default_callbacks());
+        fo.remote_callbacks(default_callbacks(token));
         let _ = remote.fetch(&[&format!("refs/heads/{branch}:refs/heads/{branch}")], Some(&mut fo), None);
     }
 
@@ -385,7 +386,7 @@ fn commit_and_push(repo: &Repository, branch: &str, hint: &str) -> Result<(), Ap
         .find_remote("origin")
         .map_err(|e| AppError::Config(format!("find origin: {e}")))?;
     let mut push_opts = PushOptions::new();
-    push_opts.remote_callbacks(default_callbacks());
+    push_opts.remote_callbacks(default_callbacks(token));
     let refspec = format!("+refs/heads/{branch}:refs/heads/{branch}");
     remote
         .push(&[&refspec], Some(&mut push_opts))
@@ -393,11 +394,18 @@ fn commit_and_push(repo: &Repository, branch: &str, hint: &str) -> Result<(), Ap
     Ok(())
 }
 
-fn default_callbacks<'a>() -> git2::RemoteCallbacks<'a> {
+fn default_callbacks<'a>(token: &'a str) -> git2::RemoteCallbacks<'a> {
     let mut cb = git2::RemoteCallbacks::new();
-    // For local-bare testing we don't need any creds. For HTTPS + token the
-    // token is in the URL already. The system credential helper is consulted
-    // last for SSH use cases. This is intentionally a no-op for the tests.
+    // Inject the token via the credentials callback so it's never written
+    // to `.git/config` (which would happen if we put it in the URL).
+    // libgit2 calls this for both fetch and push; the username is the
+    // arbitrary placeholder `x-access-token` that GitHub recognises.
+    if !token.is_empty() {
+        let token_owned = token.to_string();
+        cb.credentials(move |_url, _username_from_url, _allowed_types| {
+            git2::Cred::userpass_plaintext("x-access-token", &token_owned)
+        });
+    }
     cb
 }
 
@@ -578,10 +586,13 @@ mod tests {
     }
 
     #[test]
-    fn test_github_provider_clone_url_with_token_includes_credentials() {
+    fn test_github_provider_clone_url_omits_token() {
+        // SECURITY: clone URL must never carry the token. Auth is injected
+        // via RemoteCallbacks.credentials (see default_callbacks).
         let p = GitHubZipProvider::new("user/repo", "main", "ghp_xxx");
         let url = p.clone_url();
-        assert!(url.contains("x-access-token:ghp_xxx"), "got: {url}");
+        assert!(!url.contains("ghp_xxx"), "token leaked into URL: {url}");
+        assert!(!url.contains("x-access-token"), "token leaked into URL: {url}");
         assert!(url.contains("github.com/user/repo"), "got: {url}");
     }
 }

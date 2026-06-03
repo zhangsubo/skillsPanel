@@ -131,7 +131,9 @@ impl GitUrlParser {
         None
     }
 
-    fn parse_github_content_url(url: &str) -> Option<(String, String, Option<String>, Option<String>)> {
+    fn parse_github_content_url(
+        url: &str,
+    ) -> Option<(String, String, Option<String>, Option<String>)> {
         let github_prefix = "https://github.com/";
         if !url.starts_with(github_prefix) {
             return None;
@@ -274,11 +276,15 @@ mod tests {
     #[test]
     fn test_parse_blob_url_real_example() {
         // Real-world blob URL like the user's case
-        let parsed =
-            GitUrlParser::parse_git_source("https://github.com/anthropics/skills/blob/main/skills/skill-creator/");
+        let parsed = GitUrlParser::parse_git_source(
+            "https://github.com/anthropics/skills/blob/main/skills/skill-creator/",
+        );
         assert_eq!(parsed.clone_url, "https://github.com/anthropics/skills");
         assert_eq!(parsed.branch, Some("main/skills/skill-creator".to_string()));
-        assert_eq!(parsed.tree_path, Some("main/skills/skill-creator".to_string()));
+        assert_eq!(
+            parsed.tree_path,
+            Some("main/skills/skill-creator".to_string())
+        );
         assert!(parsed.subpath.is_none());
     }
 
