@@ -1,3 +1,9 @@
+## [0.6.4](https://github.com/zhangsubo/skillsPanel/compare/v0.6.3...v0.6.4) (2026-06-07)
+
+### 修复
+
+* 项目工作区添加项目后立即可见 ([54739a3](https://github.com/zhangsubo/skillsPanel/commit/54739a391f38ae77fd9d187b5f8801ab9ef77b0e))
+
 ## [0.6.3](https://github.com/zhangsubo/skillsPanel/compare/v0.6.2...v0.6.3) (2026-06-01)
 
 ### 修复
