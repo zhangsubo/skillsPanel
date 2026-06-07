@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useLibrary } from '@/hooks/use-library'
+import { useTags } from '@/hooks/use-tags'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -15,9 +16,12 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Package, Trash2, Search, Loader2 } from 'lucide-react'
-import type { Skill, SkillWithStatus } from '@/types'
+import { Package, Trash2, Search, Loader2, Tag as TagIcon } from 'lucide-react'
+import type { Skill, SkillWithStatus, Tag } from '@/types'
 import { batchDeleteSkills } from '@/api/library'
+import { TagChip } from '@/components/TagChip'
+import { TagFilter } from '@/components/TagFilter'
+import { TagManagerDialog } from '@/components/TagManagerDialog'
 
 const createFallbackSkill = (name: string): Skill => ({
   id: name,
@@ -43,7 +47,11 @@ export default function Library() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { skillNames, installedSkills, scanResult, loading, error, refresh, scan, deleteSkill } = useLibrary()
+  const { tags, fetchAllSkillTagsMap } = useTags()
   const [searchQuery, setSearchQuery] = useState('')
+  const [filterTagId, setFilterTagId] = useState<string | null>(null)
+  const [skillTagMap, setSkillTagMap] = useState<Map<string, Tag[]>>(new Map())
+  const [tagManagerOpen, setTagManagerOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<SkillWithStatus | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [clearingAll, setClearingAll] = useState(false)
@@ -94,14 +102,36 @@ export default function Library() {
   }, [installedSkills, scanResult, skillNames])
 
   const filteredSkills = useMemo(() => {
-    if (!searchQuery.trim()) return skills
-    const q = searchQuery.toLowerCase()
-    return skills.filter(
-      (s) =>
-        s.skill.name.toLowerCase().includes(q) ||
-        s.skill.description.toLowerCase().includes(q),
-    )
-  }, [skills, searchQuery])
+    let result = skills
+    if (filterTagId) {
+      result = result.filter((s) => (skillTagMap.get(s.skill.id) ?? []).some((t) => t.id === filterTagId))
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      result = result.filter(
+        (s) =>
+          s.skill.name.toLowerCase().includes(q) ||
+          s.skill.description.toLowerCase().includes(q),
+      )
+    }
+    return result
+  }, [skills, searchQuery, filterTagId, skillTagMap])
+
+  // Load skill→tags mapping whenever the visible skills change.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const map = await fetchAllSkillTagsMap()
+        if (!cancelled) setSkillTagMap(map)
+      } catch {
+        // best-effort: leave the map empty on error
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [fetchAllSkillTagsMap, skills])
 
   const handleDelete = async () => {
     if (!deleteTarget) return
@@ -211,6 +241,15 @@ export default function Library() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold text-foreground">{t('library.title')}</h2>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setTagManagerOpen(true)}
+            className="text-xs"
+          >
+            <TagIcon className="mr-1 h-3.5 w-3.5" />
+            {t('tag.manage')}
+          </Button>
           {skills.length > 0 && (
             <Button
               variant="outline"
@@ -232,14 +271,23 @@ export default function Library() {
       </div>
 
       {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder={t('library.searchPlaceholder')}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-9"
-        />
+      <div className="flex flex-col gap-3">
+        <div className="relative max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder={t('library.searchPlaceholder')}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        {tags.length > 0 && (
+          <TagFilter
+            tags={tags}
+            value={filterTagId}
+            onChange={setFilterTagId}
+          />
+        )}
       </div>
 
       {/* Card Grid */}
@@ -298,6 +346,30 @@ export default function Library() {
                     </div>
                   )}
 
+                  {/* Tag chips — read from the bulk skill→tags map.
+                      Clicking a chip applies the corresponding tag filter. */}
+                  {(() => {
+                    const skillTags = skillTagMap.get(skill.id) ?? []
+                    if (skillTags.length === 0) return null
+                    return (
+                      <div className="mt-2 flex items-center gap-1 flex-wrap">
+                        {skillTags.slice(0, 4).map((tag) => (
+                          <TagChip
+                            key={tag.id}
+                            tag={tag}
+                            onClick={(t) => setFilterTagId(t.id)}
+                            selected={filterTagId === tag.id}
+                          />
+                        ))}
+                        {skillTags.length > 4 && (
+                          <span className="text-[10px] text-muted-foreground">
+                            +{skillTags.length - 4}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })()}
+
                   {/* Delete button - visible on hover */}
                   <div className="absolute bottom-3 right-3 opacity-0 transition-opacity group-hover:opacity-100">
                     <Button
@@ -346,6 +418,11 @@ export default function Library() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <TagManagerDialog
+        open={tagManagerOpen}
+        onClose={() => setTagManagerOpen(false)}
+      />
     </div>
   )
 }
