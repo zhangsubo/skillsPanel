@@ -57,6 +57,11 @@ export default function Settings() {
   const sync = useSync()
   const [archivePassword, setArchivePassword] = useState('')
   const [showAddProvider, setShowAddProvider] = useState(false)
+  const [archivePwBusy, setArchivePwBusy] = useState(false)
+  const [archivePwMsg, setArchivePwMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [githubToken, setGithubToken] = useState('')
+  const [githubTokenSaved, setGithubTokenSaved] = useState<boolean | null>(null)
+  const [githubTokenBusy, setGithubTokenBusy] = useState(false)
 
   const [showAddTool, setShowAddTool] = useState(false)
   const [newToolName, setNewToolName] = useState('')
@@ -90,6 +95,12 @@ export default function Settings() {
   useEffect(() => {
     loadConfig()
   }, [loadConfig])
+
+  // Probe the GitHub token status on mount so the user can tell at
+  // a glance whether their PAT is set.
+  useEffect(() => {
+    void sync.hasGitHubToken().then(setGithubTokenSaved)
+  }, [sync])
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion(''))
@@ -447,6 +458,61 @@ export default function Settings() {
           </Button>
         </CardHeader>
         <CardContent>
+          {/* GitHub PAT — kept global (not per-provider) since one user
+              typically reuses the same token across all their repos.
+              Stored under SENSITIVE_KEY `github_token` (encrypted). */}
+          <div className="mb-4 rounded-lg border p-3">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">
+                {t('sync.fields.token')}
+              </label>
+              {githubTokenSaved !== null && (
+                <span
+                  data-testid="github-token-status"
+                  className={`text-[10px] ${
+                    githubTokenSaved ? 'text-green-600' : 'text-muted-foreground'
+                  }`}
+                >
+                  {githubTokenSaved ? '✓ ' + t('sync.tokenSaved') : t('sync.tokenNotSet')}
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t('sync.fields.tokenHint')}
+            </p>
+            <div className="mt-2 flex gap-2">
+              <Input
+                type="password"
+                value={githubToken}
+                onChange={(e) => setGithubToken(e.target.value)}
+                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                className="flex-1"
+                data-testid="github-token-input"
+                autoComplete="off"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!githubToken.trim() || githubTokenBusy}
+                onClick={async () => {
+                  setGithubTokenBusy(true);
+                  try {
+                    await sync.setGitHubToken(githubToken);
+                    setGithubTokenSaved(true);
+                    setGithubToken('');
+                  } catch (e) {
+                    setGithubTokenSaved(false);
+                    console.error(e);
+                  } finally {
+                    setGithubTokenBusy(false);
+                  }
+                }}
+              >
+                {t('sync.setPassword')}
+              </Button>
+            </div>
+          </div>
+
           {/* Archive password (encrypted via SENSITIVE_KEYS) */}
           <div className="mb-4 rounded-lg border p-3">
             <label className="text-sm font-medium">
@@ -467,21 +533,43 @@ export default function Settings() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={!archivePassword.trim()}
+                disabled={!archivePassword.trim() || archivePwBusy}
                 onClick={async () => {
+                  setArchivePwBusy(true);
+                  setArchivePwMsg(null);
                   try {
                     await invokeCommand('set_config_value', {
                       key: 'backup_archive_password',
                       value: archivePassword,
                     });
+                    setArchivePwMsg({ kind: 'ok', text: t('sync.archivePasswordSaved') });
+                    setArchivePassword('');
                   } catch (e) {
-                    console.error(e);
+                    setArchivePwMsg({
+                      kind: 'err',
+                      text: e instanceof Error ? e.message : String(e),
+                    });
+                  } finally {
+                    setArchivePwBusy(false);
                   }
                 }}
               >
+                {archivePwBusy ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : null}
                 {t('sync.setPassword')}
               </Button>
             </div>
+            {archivePwMsg && (
+              <p
+                data-testid="sync-archive-password-feedback"
+                className={`mt-2 text-xs ${
+                  archivePwMsg.kind === 'ok' ? 'text-green-600' : 'text-destructive'
+                }`}
+              >
+                {archivePwMsg.text}
+              </p>
+            )}
           </div>
 
           {sync.error && (
@@ -523,10 +611,23 @@ export default function Settings() {
                     <Button
                       size="sm"
                       disabled={sync.loading}
-                      onClick={() => sync.syncUp(p.id).catch(() => {})}
+                      onClick={() => {
+                        sync.syncUp(p.id).catch(() => {
+                          // Error already set on the hook; the
+                          // existing `sync.error` strip below renders
+                          // the message. Re-throw is unnecessary.
+                        });
+                      }}
                       data-testid={`sync-up-btn-${p.id}`}
                     >
-                      {t('sync.syncUp')}
+                      {sync.loading ? (
+                        <>
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          {t('sync.syncing')}
+                        </>
+                      ) : (
+                        t('sync.syncUp')
+                      )}
                     </Button>
                     <button
                       type="button"
@@ -549,25 +650,53 @@ export default function Settings() {
           {/* Recent history — last 5 across all providers */}
           {sync.history.length > 0 && (
             <div className="mt-4 border-t pt-3">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">
-                {t('sync.history')}
-              </p>
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-medium text-muted-foreground">
+                  {t('sync.history')}
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-[10px] text-muted-foreground hover:text-destructive"
+                  onClick={() => {
+                    // Build the set of distinct provider ids in the
+                    // visible history; clearing per-provider gives the
+                    // user a finer-grained escape hatch than nuking
+                    // everything at once.
+                    const ids = Array.from(
+                      new Set(sync.history.map((h) => h.provider_id)),
+                    );
+                    void Promise.all(
+                      ids.map((id) => sync.clearHistory(id)),
+                    ).then(() => sync.refresh());
+                  }}
+                  data-testid="sync-clear-history-btn"
+                >
+                  {t('sync.clearHistory')}
+                </Button>
+              </div>
               <div className="space-y-1">
                 {sync.history.slice(0, 5).map((h) => (
                   <div
                     key={h.id}
-                    className="flex items-center justify-between text-xs"
+                    className="flex items-start justify-between gap-2 text-xs"
+                    title={h.error_message ?? undefined}
                   >
                     <span className="text-muted-foreground">
                       {h.started_at} · {h.direction} · {h.provider_id.slice(0, 8)}
+                      {h.status === 'error' && h.error_message && (
+                        <span className="mt-0.5 block text-destructive">
+                          {h.error_message}
+                        </span>
+                      )}
                     </span>
                     <span
                       className={
                         h.status === 'success'
-                          ? 'text-green-600'
+                          ? 'shrink-0 text-green-600'
                           : h.status === 'cancelled'
-                            ? 'text-muted-foreground'
-                            : 'text-destructive'
+                            ? 'shrink-0 text-muted-foreground'
+                            : 'shrink-0 text-destructive'
                       }
                     >
                       {h.status}
@@ -729,6 +858,7 @@ function AddSyncProviderDialog({
   const [kind, setKind] = useState<'github_zip' | 'webdav'>('webdav');
   const [repo, setRepo] = useState('');
   const [branch, setBranch] = useState('main');
+  const [token, setToken] = useState('');
   const [url, setUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -757,6 +887,14 @@ function AddSyncProviderDialog({
             value: password,
           });
         }
+      } else if (kind === 'github_zip' && token) {
+        // GitHub PAT is stored under a single global key (per-user
+        // PAT typically applies to all repos). The provider's
+        // config_json holds only the repo + branch metadata.
+        await invokeCommand('set_config_value', {
+          key: 'github_token',
+          value: token,
+        });
       }
       const configJson =
         kind === 'github_zip'
@@ -819,6 +957,19 @@ function AddSyncProviderDialog({
                 onChange={(e) => setBranch(e.target.value)}
                 placeholder={t('sync.fields.branchPlaceholder')}
               />
+            </div>
+            <div>
+              <label className="text-sm text-muted-foreground">{t('sync.fields.token')}</label>
+              <Input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder={t('sync.fields.tokenPlaceholder')}
+                autoComplete="off"
+              />
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                {t('sync.fields.tokenHint')}
+              </p>
             </div>
           </>
         ) : (

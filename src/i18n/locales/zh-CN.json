@@ -229,6 +229,9 @@
   "sync.fields.repoPlaceholder": "user/repo 或完整 https URL",
   "sync.fields.branch": "分支",
   "sync.fields.branchPlaceholder": "main",
+  "sync.fields.token": "个人访问令牌 (PAT)",
+  "sync.fields.tokenPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxx",
+  "sync.fields.tokenHint": "GitHub → Settings → Developer settings → Personal access tokens。需 `repo` scope。",
   "sync.fields.url": "服务器 URL",
   "sync.fields.urlPlaceholder": "https://nextcloud.example.com/remote.php/dav/files/alice",
   "sync.fields.username": "用户名",
@@ -242,5 +245,10 @@
   "sync.bytes": "{{n}} 字节",
   "sync.skillsCount": "{{n}} 个 Skill",
   "sync.neverSetPassword": "请先在下方设置备份密码。",
-  "sync.setPassword": "设置备份密码"
+  "sync.setPassword": "设置备份密码",
+  "sync.archivePasswordSaved": "备份密码已保存",
+  "sync.syncing": "正在同步…",
+  "sync.clearHistory": "清空历史",
+  "sync.tokenSaved": "已保存",
+  "sync.tokenNotSet": "未设置"
 }

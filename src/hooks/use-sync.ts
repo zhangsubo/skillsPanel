@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   createSyncProvider,
+  clearSyncHistory as apiClearSyncHistory,
   deleteSyncProvider,
   getAllSyncHistory,
   getSyncHistory,
@@ -9,6 +10,7 @@ import {
   testSyncProviderConnection,
   updateSyncProvider,
 } from '@/api/sync';
+import { invokeCommand } from '@/api';
 import type { SyncHistory, SyncProvider } from '@/types';
 
 interface UseSyncState {
@@ -27,6 +29,9 @@ interface UseSyncState {
   syncUp: (id: string) => Promise<SyncHistory>;
   syncDown: (id: string) => Promise<SyncHistory>;
   loadHistory: (providerId: string) => Promise<SyncHistory[]>;
+  clearHistory: (providerId: string) => Promise<number>;
+  hasGitHubToken: () => Promise<boolean>;
+  setGitHubToken: (token: string) => Promise<void>;
 }
 
 /**
@@ -103,26 +108,61 @@ export function useSync(): UseSyncState {
 
   const syncUp = useCallback(
     async (id: string) => {
-      const h = await syncNow(id, 'upload');
-      setHistory((prev) => [h, ...prev].slice(0, 50));
-      await refresh();
-      return h;
+      try {
+        const h = await syncNow(id, 'upload');
+        setHistory((prev) => [h, ...prev].slice(0, 50));
+        await refresh();
+        return h;
+      } catch (e) {
+        setError(e as Error);
+        throw e;
+      } finally {
+        // Force a refresh so `loading` is reset even on the error path —
+        // otherwise the button stays disabled after a failure.
+        await refresh();
+      }
     },
     [refresh],
   );
 
   const syncDown = useCallback(
     async (id: string) => {
-      const h = await syncNow(id, 'download');
-      setHistory((prev) => [h, ...prev].slice(0, 50));
-      await refresh();
-      return h;
+      try {
+        const h = await syncNow(id, 'download');
+        setHistory((prev) => [h, ...prev].slice(0, 50));
+        await refresh();
+        return h;
+      } catch (e) {
+        setError(e as Error);
+        throw e;
+      } finally {
+        await refresh();
+      }
     },
     [refresh],
   );
 
   const loadHistory = useCallback(async (providerId: string) => {
     return getSyncHistory(providerId, 50);
+  }, []);
+
+  const clearHistory = useCallback(async (providerId: string) => {
+    const removed = await apiClearSyncHistory(providerId);
+    setHistory((prev) => prev.filter((h) => h.provider_id !== providerId));
+    return removed;
+  }, []);
+
+  const hasGitHubToken = useCallback(async () => {
+    try {
+      const v = await invokeCommand<string | null>('get_config_value', { key: 'github_token' });
+      return !!v && v.length > 0;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const setGitHubToken = useCallback(async (token: string) => {
+    await invokeCommand('set_config_value', { key: 'github_token', value: token });
   }, []);
 
   return {
@@ -138,5 +178,8 @@ export function useSync(): UseSyncState {
     syncUp,
     syncDown,
     loadHistory,
+    clearHistory,
+    hasGitHubToken,
+    setGitHubToken,
   };
 }

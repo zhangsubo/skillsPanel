@@ -1959,6 +1959,19 @@ impl<'a> SyncHistoryRepository<'a> {
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|e| AppError::Config(format!("Failed to read recent: {}", e)))
     }
+
+    /// Wipe every history row for a provider. Returns the count
+    /// removed. Drives the "Clear history" button in Settings.
+    pub fn clear_for_provider(&self, provider_id: &str) -> Result<usize, AppError> {
+        let conn = self.db.connection();
+        let affected = conn
+            .execute(
+                "DELETE FROM sync_history WHERE provider_id = ?1",
+                params![provider_id],
+            )
+            .map_err(|e| AppError::Config(format!("Failed to clear history: {}", e)))?;
+        Ok(affected)
+    }
 }
 
 #[cfg(test)]
@@ -3004,6 +3017,36 @@ mod tests {
         // list_recent limit=2
         let recent = hist_repo.list_recent(2).unwrap();
         assert_eq!(recent.len(), 2);
+    }
+
+    #[test]
+    fn test_sync_history_clear_for_provider() {
+        let db = create_test_database();
+        let prov_repo = SyncProvidersRepository::new(&db);
+        let hist_repo = SyncHistoryRepository::new(&db);
+        let p1 = prov_repo.create("p1", "webdav", "{}", true).unwrap();
+        let p2 = prov_repo.create("p2", "webdav", "{}", true).unwrap();
+
+        // 3 rows for p1, 2 for p2
+        for _ in 0..3 {
+            let h = hist_repo.record_start(&p1.id, "upload").unwrap();
+            hist_repo.finish(&h, "success", None, None, None).unwrap();
+        }
+        for _ in 0..2 {
+            let h = hist_repo.record_start(&p2.id, "upload").unwrap();
+            hist_repo.finish(&h, "success", None, None, None).unwrap();
+        }
+        assert_eq!(hist_repo.list_for_provider(&p1.id, 100).unwrap().len(), 3);
+        assert_eq!(hist_repo.list_for_provider(&p2.id, 100).unwrap().len(), 2);
+
+        // Clear p1 only — p2 should be untouched.
+        let removed = hist_repo.clear_for_provider(&p1.id).unwrap();
+        assert_eq!(removed, 3);
+        assert!(hist_repo.list_for_provider(&p1.id, 100).unwrap().is_empty());
+        assert_eq!(hist_repo.list_for_provider(&p2.id, 100).unwrap().len(), 2);
+
+        // Calling clear again on an empty provider returns 0.
+        assert_eq!(hist_repo.clear_for_provider(&p1.id).unwrap(), 0);
     }
 
     #[test]

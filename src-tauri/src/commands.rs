@@ -1497,6 +1497,25 @@ pub fn get_all_sync_history(
 }
 
 #[tauri::command]
+pub fn clear_sync_history(
+    state: State<'_, SharedState>,
+    provider_id: String,
+) -> Result<usize, AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.clone();
+    let removed =
+        crate::core::database::SyncHistoryRepository::new(&database).clear_for_provider(&provider_id)?;
+    crate::core::database::AuditRepository::new(&database).log(
+        "clear_sync_history",
+        &provider_id,
+        Some(format!("removed={removed}")),
+        true,
+        None,
+    )?;
+    Ok(removed)
+}
+
+#[tauri::command]
 pub fn test_sync_provider_connection(
     state: State<'_, SharedState>,
     provider_id: String,

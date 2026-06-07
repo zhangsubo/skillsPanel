@@ -62,6 +62,15 @@ impl GitHubZipProvider {
         if self.local_bare.is_some() {
             let path = self.local_bare.as_ref().unwrap();
             format!("file://{}", path.to_string_lossy())
+        } else if self.repo.starts_with("http://") || self.repo.starts_with("https://") {
+            // User pasted a full URL — don't double-prefix `github.com/`.
+            // Normalize trailing slash and append `.git` if missing.
+            let trimmed = self.repo.trim_end_matches('/');
+            if trimmed.ends_with(".git") {
+                trimmed.to_string()
+            } else {
+                format!("{trimmed}.git")
+            }
         } else {
             format!("https://github.com/{}.git", self.repo)
         }
@@ -230,12 +239,19 @@ impl SyncProvider for GitHubZipProvider {
 // ── helpers ────────────────────────────────────────────────────────
 
 fn clone_or_init_bare(url: &str, dest: &Path) -> Result<Repository, AppError> {
-    // If the remote is empty (first push ever), clone returns an error.
-    // Fall back to a fresh local repo that we'll later push to the bare.
-    match Repository::clone(url, dest) {
-        Ok(r) => Ok(r),
-        Err(_) => Repository::init(dest).map_err(|e| AppError::Config(format!("init repo: {e}"))),
-    }
+    // Try to clone the remote repo. If the remote is empty (first push
+    // ever) or unreachable, surface the error to the user instead of
+    // silently falling back to a fresh local repo — that fallback would
+    // hide the real failure behind a confusing "remote 'origin' not
+    // found" error during push.
+    Repository::clone(url, dest).map_err(|e| {
+        AppError::Config(format!(
+            "Failed to clone {}: {}. Check that the repo exists, is accessible, \
+             and that a personal access token with `repo` scope is set in \
+             Settings → Backup → Edit provider.",
+            url, e
+        ))
+    })
 }
 
 fn ensure_branch(repo: &Repository, branch: &str) -> Result<(), AppError> {
@@ -594,5 +610,23 @@ mod tests {
         assert!(!url.contains("ghp_xxx"), "token leaked into URL: {url}");
         assert!(!url.contains("x-access-token"), "token leaked into URL: {url}");
         assert!(url.contains("github.com/user/repo"), "got: {url}");
+    }
+
+    #[test]
+    fn test_github_provider_clone_url_handles_full_url_input() {
+        // Regression: a full https URL pasted into the repo field used
+        // to produce a double-prefix `https://github.com/https://...`
+        // which 404s. Accept both shorthand and full URL forms.
+        let p1 = GitHubZipProvider::new("user/repo", "main", "");
+        assert_eq!(p1.clone_url(), "https://github.com/user/repo.git");
+
+        let p2 = GitHubZipProvider::new("https://github.com/user/repo", "main", "");
+        assert_eq!(p2.clone_url(), "https://github.com/user/repo.git");
+
+        let p3 = GitHubZipProvider::new("https://github.com/user/repo.git", "main", "");
+        assert_eq!(p3.clone_url(), "https://github.com/user/repo.git");
+
+        let p4 = GitHubZipProvider::new("https://github.com/user/repo/", "main", "");
+        assert_eq!(p4.clone_url(), "https://github.com/user/repo.git");
     }
 }

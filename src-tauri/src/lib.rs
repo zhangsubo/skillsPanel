@@ -185,6 +185,7 @@ pub fn run() {
             commands::delete_sync_provider,
             commands::get_sync_history,
             commands::get_all_sync_history,
+            commands::clear_sync_history,
             commands::test_sync_provider_connection,
             commands::sync_now,
         ])

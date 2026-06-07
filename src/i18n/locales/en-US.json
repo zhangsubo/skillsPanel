@@ -229,6 +229,9 @@
   "sync.fields.repoPlaceholder": "user/repo or full https URL",
   "sync.fields.branch": "Branch",
   "sync.fields.branchPlaceholder": "main",
+  "sync.fields.token": "Personal Access Token (PAT)",
+  "sync.fields.tokenPlaceholder": "ghp_xxxxxxxxxxxxxxxxxxxx",
+  "sync.fields.tokenHint": "GitHub → Settings → Developer settings → Personal access tokens. Requires `repo` scope.",
   "sync.fields.url": "Server URL",
   "sync.fields.urlPlaceholder": "https://nextcloud.example.com/remote.php/dav/files/alice",
   "sync.fields.username": "Username",
@@ -242,5 +245,10 @@
   "sync.bytes": "{{n}} bytes",
   "sync.skillsCount": "{{n}} skills",
   "sync.neverSetPassword": "Set a backup password below to enable sync.",
-  "sync.setPassword": "Set backup password"
+  "sync.setPassword": "Set backup password",
+  "sync.archivePasswordSaved": "Backup password saved",
+  "sync.syncing": "Syncing…",
+  "sync.clearHistory": "Clear history",
+  "sync.tokenSaved": "Saved",
+  "sync.tokenNotSet": "Not set"
 }

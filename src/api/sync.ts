@@ -66,6 +66,10 @@ export async function getAllSyncHistory(
   });
 }
 
+export async function clearSyncHistory(providerId: string): Promise<number> {
+  return invokeCommand<number>('clear_sync_history', { providerId });
+}
+
 export async function testSyncProviderConnection(
   providerId: string,
 ): Promise<void> {
