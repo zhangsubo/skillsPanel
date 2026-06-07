@@ -20,7 +20,7 @@ import { Package, Trash2, Search, Loader2, Tag as TagIcon } from 'lucide-react'
 import type { Skill, SkillWithStatus, Tag } from '@/types'
 import { batchDeleteSkills } from '@/api/library'
 import { TagChip } from '@/components/TagChip'
-import { TagFilter } from '@/components/TagFilter'
+import { TagFilter, UNTAGGED_FILTER } from '@/components/TagFilter'
 import { TagManagerDialog } from '@/components/TagManagerDialog'
 
 const createFallbackSkill = (name: string): Skill => ({
@@ -103,7 +103,9 @@ export default function Library() {
 
   const filteredSkills = useMemo(() => {
     let result = skills
-    if (filterTagId) {
+    if (filterTagId === UNTAGGED_FILTER) {
+      result = result.filter((s) => (skillTagMap.get(s.skill.id) ?? []).length === 0)
+    } else if (filterTagId) {
       result = result.filter((s) => (skillTagMap.get(s.skill.id) ?? []).some((t) => t.id === filterTagId))
     }
     if (searchQuery.trim()) {

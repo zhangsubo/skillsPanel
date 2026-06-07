@@ -32,12 +32,56 @@ interface TagManagerDialogProps {
   focusTagId?: string;
 }
 
+/** Visually distinct palette for tag colors. */
+const TAG_PALETTE = [
+  '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16',
+  '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6', '#6366f1',
+  '#8b5cf6', '#a855f7', '#d946ef', '#ec4899', '#f43f5e',
+  '#64748b', '#78716c', '#0ea5e9', '#10b981', '#e11d48',
+];
+
+/** Minimum Euclidean distance in RGB space to consider two colors "different". */
+const MIN_COLOR_DISTANCE = 80;
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
+function colorDistance(a: string, b: string): number {
+  const [r1, g1, b1] = hexToRgb(a);
+  const [r2, g2, b2] = hexToRgb(b);
+  return Math.sqrt((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2);
+}
+
+/**
+ * Pick a random color from TAG_PALETTE that is visually distinct from all
+ * existing tag colors (Euclidean RGB distance >= MIN_COLOR_DISTANCE).
+ * Falls back to any unused exact-match color, then any palette color.
+ */
+function pickRandomColor(existingColors: string[]): string {
+  // Tier 1: visually distant from all existing colors
+  const distant = TAG_PALETTE.filter(
+    (c) => existingColors.every((e) => colorDistance(c, e) >= MIN_COLOR_DISTANCE),
+  );
+  if (distant.length > 0) {
+    return distant[Math.floor(Math.random() * distant.length)];
+  }
+  // Tier 2: at least not an exact duplicate
+  const unique = TAG_PALETTE.filter((c) => !existingColors.includes(c));
+  if (unique.length > 0) {
+    return unique[Math.floor(Math.random() * unique.length)];
+  }
+  // Tier 3: all taken, pick any
+  return TAG_PALETTE[Math.floor(Math.random() * TAG_PALETTE.length)];
+}
+
 export function TagManagerDialog({ open, onClose, selectedSkillIds = [], focusTagId }: TagManagerDialogProps) {
   const { t } = useTranslation();
   const { tags, loading, create, remove, bulkAttach, attach, detach, tagsForSkill } = useTags();
 
   const [newName, setNewName] = useState('');
-  const [newColor, setNewColor] = useState('#3b82f6');
+  const [newColor, setNewColor] = useState(() => pickRandomColor([]));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,7 +99,7 @@ export function TagManagerDialog({ open, onClose, selectedSkillIds = [], focusTa
   useEffect(() => {
     if (open) {
       setNewName('');
-      setNewColor('#3b82f6');
+      setNewColor(pickRandomColor(tags.map((t) => t.color).filter((c): c is string => c !== null)));
       setError(null);
     }
   }, [open]);

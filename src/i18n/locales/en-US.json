@@ -205,6 +205,7 @@
   "tag.attach": "Add",
   "tag.detach": "Attached",
   "tag.filterAll": "All",
+  "tag.filterUntagged": "Untagged",
 
   "sync.title": "Cloud Backup",
   "sync.subtitle": "Encrypt your skills and back them up to a GitHub private repo or any WebDAV server.",

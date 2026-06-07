@@ -205,6 +205,7 @@
   "tag.attach": "添加",
   "tag.detach": "已附加",
   "tag.filterAll": "全部",
+  "tag.filterUntagged": "无标签",
 
   "sync.title": "云备份",
   "sync.subtitle": "把 Skills 加密后备份到 GitHub 私有仓库或任意 WebDAV 服务器。",

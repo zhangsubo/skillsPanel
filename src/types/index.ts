@@ -73,6 +73,14 @@ export interface RuleDecision {
   source: RuleSource | null;
 }
 
+export interface Tag {
+  id: string;
+  name: string;
+  color: string | null;
+  description: string | null;
+  created_at: string;
+}
+
 export interface SkillWithStatus {
   skill: Skill;
   tool_statuses: Record<string, SkillToolStatus>;
