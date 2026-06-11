@@ -31,7 +31,7 @@ impl Scanner {
 
             for dir in skill_dirs {
                 if let Some(skill) =
-                    Self::parse_skill_dir(&dir, &source.group, "local-folder", library)
+                    Self::parse_skill_dir(&dir, &source.group, "local-folder", library, None)
                 {
                     if let Some(existing) = seen_names.get(&skill.skill.name) {
                         if existing != &dir {
@@ -51,7 +51,7 @@ impl Scanner {
             }
             let lib_path = library.skill_path(&name);
             if let Some(skill) =
-                Self::parse_skill_dir(&lib_path, "library", "local-folder", library)
+                Self::parse_skill_dir(&lib_path, "library", "local-folder", library, Some(&name))
             {
                 seen_names.insert(name, lib_path);
                 skills.push(skill);
@@ -126,15 +126,20 @@ impl Scanner {
         group: &str,
         source_type: &str,
         library: &SkillLibrary,
+        canonical_name: Option<&str>,
     ) -> Option<SkillWithStatus> {
         let skill_md = fs_utils::find_skill_marker(dir)?;
         let content = fs::read_to_string(&skill_md).ok()?;
         let (frontmatter, _body) = SkillEngine::parse_frontmatter(&content)?;
 
-        let name = frontmatter
-            .get("name")
-            .and_then(|v| v.as_str())
+        let name = canonical_name
             .map(String::from)
+            .or_else(|| {
+                frontmatter
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
             .or_else(|| dir.file_name().map(|n| n.to_string_lossy().into_owned()))
             .unwrap_or_default();
 

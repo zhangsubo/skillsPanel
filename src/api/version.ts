@@ -8,10 +8,24 @@ interface GitHubTag {
   name: string
 }
 
-export async function fetchLatestGitHubTag(): Promise<string | null> {
+/**
+ * Fetch the latest tag from the GitHub repo.
+ * When a `github_token` is stored in config it is sent as a Bearer token
+ * to avoid the 60-req/hour anonymous rate-limit.
+ */
+export async function fetchLatestGitHubTag(
+  token?: string | null,
+): Promise<string | null> {
   try {
+    const headers: Record<string, string> = {
+      Accept: 'application/vnd.github+json',
+    }
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
+    }
     const response = await fetch(
       'https://api.github.com/repos/zhangsubo/skillsPanel/tags?per_page=1',
+      { headers },
     )
     if (!response.ok) return null
     const tags: GitHubTag[] = await response.json()
@@ -48,7 +62,16 @@ export async function checkForUpdate(): Promise<{
   latestVersion: string | null
 }> {
   const currentVersion = await getAppVersion()
-  const latestVersion = await fetchLatestGitHubTag()
+  // Read the optional GitHub PAT so the tags request isn't rate-limited.
+  let token: string | null = null
+  try {
+    token = await invokeCommand<string | null>('get_config_value', {
+      key: 'github_token',
+    })
+  } catch {
+    // No token stored — proceed anonymously.
+  }
+  const latestVersion = await fetchLatestGitHubTag(token)
   const hasUpdate = latestVersion
     ? isNewerVersion(currentVersion, latestVersion)
     : false

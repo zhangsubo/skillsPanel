@@ -214,7 +214,40 @@ impl SyncProvider for WebDavProvider {
     fn test_connection(&self) -> Result<(), AppError> {
         // list_remote is the strongest connectivity check: it requires
         // auth to succeed, and the response to be well-formed XML.
-        self.list_remote().map(|_| ())
+        //
+        // If the remote_path doesn't exist yet (404), fall back to a
+        // PROPFIND on the base_url to verify credentials are valid.
+        match self.list_remote() {
+            Ok(_) => Ok(()),
+            Err(AppError::Config(ref msg)) if msg.contains("404") => {
+                // Folder doesn't exist yet — verify auth against the base URL.
+                let client = self.client()?;
+                let mut headers = HeaderMap::new();
+                headers.insert(AUTHORIZATION, self.auth_header()?);
+                headers.insert(
+                    HeaderName::from_static("depth"),
+                    HeaderValue::from_static("0"),
+                );
+                let base = self.base_url.trim_end_matches('/');
+                let url = format!("{base}/");
+                let res = client
+                    .request(reqwest::Method::from_bytes(b"PROPFIND").unwrap(), &url)
+                    .headers(headers)
+                    .send()
+                    .map_err(|e| AppError::Config(format!("PROPFIND {url}: {e}")))?;
+                let status = res.status();
+                if status.is_success() {
+                    Ok(())
+                } else {
+                    let body = res.text().unwrap_or_default();
+                    Err(AppError::Config(format!(
+                        "PROPFIND {url} returned {status}: {}",
+                        body.chars().take(200).collect::<String>()
+                    )))
+                }
+            }
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -590,4 +623,5 @@ mod tests {
         let list = parse_propfind_response("<?xml ?>", "http://x/backups/");
         assert!(list.is_empty());
     }
+
 }
