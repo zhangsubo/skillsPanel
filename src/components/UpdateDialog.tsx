@@ -34,16 +34,16 @@ export default function UpdateDialog({
     setProgress(0)
     setError(null)
 
-    const success = await downloadAndInstallUpdate((p) => {
-      setProgress(Math.round(p.percent))
-    })
-
-    if (!success) {
+    try {
+      await downloadAndInstallUpdate((p) => {
+        setProgress(Math.round(p.percent))
+      })
+    } catch (e) {
       setDownloading(false)
       setProgress(0)
-      // Surface the failure to the user instead of silently resetting,
-      // so they know to retry or check their network / Tauri capabilities.
-      setError(t('updateDialog.error'))
+      // Surface the failure to the user so they know to retry or
+      // check their network / Tauri capabilities.
+      setError(e instanceof Error ? e.message : t('updateDialog.error'))
     }
   }
 
