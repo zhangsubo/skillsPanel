@@ -1,3 +1,9 @@
+## [0.7.0](https://github.com/zhangsubo/skillsPanel/compare/v0.6.5...v0.7.0) (2026-06-11)
+
+### 功能
+
+* **release:** bump version to 0.7.0 ([#1](https://github.com/zhangsubo/skillsPanel/issues/1)) ([c1036d3](https://github.com/zhangsubo/skillsPanel/commit/c1036d32892954893120f969b9e84f8edc87ecd7))
+
 ## [0.6.4](https://github.com/zhangsubo/skillsPanel/compare/v0.6.3...v0.6.4) (2026-06-07)
 
 ### 修复
