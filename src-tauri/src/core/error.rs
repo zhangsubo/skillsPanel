@@ -37,6 +37,12 @@ pub enum AppError {
 
     #[error("Cancelled")]
     Cancelled,
+
+    #[error("Sync error: {0}")]
+    Sync(String),
+
+    #[error("Download error: {0}")]
+    Download(String),
 }
 
 impl serde::Serialize for AppError {
@@ -57,5 +63,11 @@ impl From<zip::result::ZipError> for AppError {
 impl From<rusqlite::Error> for AppError {
     fn from(err: rusqlite::Error) -> Self {
         AppError::Config(format!("Database error: {}", err))
+    }
+}
+
+impl From<reqwest::Error> for AppError {
+    fn from(err: reqwest::Error) -> Self {
+        AppError::Download(err.to_string())
     }
 }

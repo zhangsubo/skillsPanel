@@ -1,6 +1,6 @@
 {
   "name": "skills-panel-app",
-  "version": "0.7.0",
+  "version": "0.7.0-dev",
   "type": "module",
   "main": "index.js",
   "scripts": {

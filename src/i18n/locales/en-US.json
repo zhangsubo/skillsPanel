@@ -226,6 +226,8 @@
   "sync.confirmDelete": "Delete this provider? Its history will also be removed.",
   "sync.kind.githubZip": "GitHub (zip repo)",
   "sync.kind.webdav": "WebDAV",
+  "sync.kind.s3": "S3",
+  "sync.kind.sftp": "SFTP",
   "sync.fields.repo": "Repository",
   "sync.fields.repoPlaceholder": "user/repo or full https URL",
   "sync.fields.branch": "Branch",
@@ -251,5 +253,14 @@
   "sync.syncing": "Syncing…",
   "sync.clearHistory": "Clear history",
   "sync.tokenSaved": "Saved",
-  "sync.tokenNotSet": "Not set"
+  "sync.tokenNotSet": "Not set",
+  "sync.rcloneNotInstalled": "rclone not installed",
+  "sync.rcloneNotInstalledDesc": "Cloud backup requires rclone. Click the button below to download and install it automatically.",
+  "sync.rcloneDownloading": "Downloading rclone…",
+  "sync.rcloneExtracting": "Extracting…",
+  "sync.rcloneInstallSuccess": "rclone installed",
+  "sync.rcloneInstallFailed": "Installation failed",
+  "sync.rcloneDownloadRclone": "Download rclone",
+  "sync.rcloneVersion": "rclone version",
+  "sync.rclonePath": "rclone path"
 }

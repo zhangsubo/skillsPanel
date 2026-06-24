@@ -20,7 +20,7 @@ pub mod platform_fs;
 pub mod project_scanner;
 pub mod repo_lock;
 pub mod resolver;
+pub mod rclone_adapter;
 pub mod scan_db;
 pub mod scanner;
 pub mod skill_engine;
-pub mod sync;

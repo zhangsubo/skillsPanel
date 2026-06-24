@@ -5,7 +5,6 @@ use crate::core::library::SkillLibrary;
 use crate::core::models::*;
 use crate::core::repo_lock::RepoLock;
 use crate::core::skill_engine::SkillEngine;
-use crate::core::sync::SyncProvider;
 use crate::AppState;
 use std::sync::Mutex;
 use tauri::Emitter;
@@ -1307,289 +1306,229 @@ pub fn get_all_skill_tags(
     crate::core::database::TagsRepository::new(&database).list_all_skill_tags()
 }
 
-// ── Sync commands ─────────────────────────────────────────────────
-// All sync commands go through SyncEngine; the command layer is
-// responsible for (1) holding the DB lock, (2) fetching credentials
-// from the config table, (3) instantiating the right SyncProvider,
-// (4) writing the audit log. The engine handles history + status.
-
-fn fetch_sync_password(database: &crate::core::database::Database) -> Result<String, AppError> {
-    use crate::core::sync::engine::PASSWORD_CONFIG_KEY;
-    crate::core::database::ConfigRepository::new(database)
-        .get(PASSWORD_CONFIG_KEY)
-        .map_err(|e| AppError::Config(format!("Failed to read archive password: {e}")))?
-        .ok_or_else(|| AppError::Config("Archive password not set. Configure it in Settings.".into()))
-}
-
-/// Snapshot of all credentials a sync needs. Constructed up front from
-/// the database (with the MutexGuard held), then handed to the engine
-/// as plain `String` data so the long sync IO doesn't pin the DB lock.
-#[derive(Default)]
-struct SyncCredentials {
-    // GitHub
-    github_repo: String,
-    github_branch: String,
-    github_token: String,
-    // WebDAV
-    webdav_url: String,
-    webdav_username: String,
-    webdav_password: String,
-    webdav_remote_path: String,
-}
-
-/// Read every credential the engine will need, in one pass, while the
-/// database lock is held. After this returns, the caller MUST drop the
-/// `MutexGuard` before invoking `run_sync_by_id`.
-fn read_sync_credentials(
-    database: &crate::core::database::Database,
-    provider: &crate::core::models::SyncProvider,
-) -> Result<SyncCredentials, AppError> {
-    use crate::core::sync::parse_config_json;
-    let mut creds = SyncCredentials::default();
-    let config = parse_config_json(&provider.config_json)
-        .map_err(|e| AppError::Config(format!("Invalid provider config: {e}")))?;
-    let cfg_repo = crate::core::database::ConfigRepository::new(database);
-    match provider.kind.as_str() {
-        "github_zip" => {
-            creds.github_repo = config
-                .get("repo")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| AppError::Config("github_zip provider missing 'repo' field".into()))?
-                .to_string();
-            creds.github_branch = config
-                .get("branch")
-                .and_then(|v| v.as_str())
-                .unwrap_or("main")
-                .to_string();
-            creds.github_token = cfg_repo.get("github_token")?.unwrap_or_default();
-        }
-        "webdav" => {
-            creds.webdav_url = config
-                .get("url")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| AppError::Config("webdav provider missing 'url' field".into()))?
-                .to_string();
-            creds.webdav_remote_path = config
-                .get("remote_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            creds.webdav_username = cfg_repo.get("webdav_username")?.unwrap_or_default();
-            creds.webdav_password = cfg_repo.get("webdav_password")?.unwrap_or_default();
-        }
-        other => return Err(AppError::Config(format!("Unknown provider kind: {other}"))),
-    }
-    Ok(creds)
-}
-
-fn build_sync_provider(
-    provider: &crate::core::models::SyncProvider,
-    creds: SyncCredentials,
-) -> Result<crate::core::sync::BoxedSyncProvider, AppError> {
-    use crate::core::sync::{GitHubZipProvider, WebDavProvider};
-    match provider.kind.as_str() {
-        "github_zip" => Ok(crate::core::sync::BoxedSyncProvider::new(
-            GitHubZipProvider::new(creds.github_repo, creds.github_branch, creds.github_token),
-        )),
-        "webdav" => Ok(crate::core::sync::BoxedSyncProvider::new(
-            WebDavProvider::new(
-                creds.webdav_url,
-                creds.webdav_username,
-                creds.webdav_password,
-                creds.webdav_remote_path,
-            ),
-        )),
-        other => Err(AppError::Config(format!("Unknown provider kind: {other}"))),
-    }
-}
-
 #[tauri::command]
-pub fn list_sync_providers(
-    state: State<'_, SharedState>,
-) -> Result<Vec<crate::core::models::SyncProvider>, AppError> {
+pub fn sync_list_providers(state: State<'_, SharedState>) -> Result<Vec<SyncProvider>, AppError> {
     let state = state.lock().unwrap();
     let database = state.database.clone();
-    crate::core::database::SyncProvidersRepository::new(&database).list(false)
+    let repo = crate::core::database::SyncProviderRepository::new(&database);
+    let mut providers = repo.list()?;
+    let decrypt_repo = crate::core::database::SyncProviderRepository::new(&database);
+    for p in &mut providers {
+        if let Ok(decrypted) = decrypt_repo.decrypt_config(&p.config_json) {
+            p.config_json = decrypted;
+        }
+    }
+    Ok(providers)
 }
 
 #[tauri::command]
-pub fn create_sync_provider(
+pub fn sync_add_provider(
     state: State<'_, SharedState>,
+    id: String,
     name: String,
     kind: String,
     config_json: String,
-) -> Result<crate::core::models::SyncProvider, AppError> {
-    let state = state.lock().unwrap();
-    let database = state.database.clone();
-    let provider = crate::core::database::SyncProvidersRepository::new(&database)
-        .create(&name, &kind, &config_json, true)?;
-    crate::core::database::AuditRepository::new(&database).log(
-        "create_sync_provider",
-        &provider.id,
-        Some(format!("name={} kind={}", provider.name, provider.kind)),
-        true,
-        None,
-    )?;
-    Ok(provider)
-}
-
-#[tauri::command]
-pub fn update_sync_provider(
-    state: State<'_, SharedState>,
-    id: String,
-    name: Option<String>,
-    config_json: Option<String>,
-    enabled: Option<bool>,
-) -> Result<(), AppError> {
-    let state = state.lock().unwrap();
-    let database = state.database.clone();
-    crate::core::database::SyncProvidersRepository::new(&database)
-        .update(&id, name.as_deref(), config_json.as_deref(), enabled)?;
-    crate::core::database::AuditRepository::new(&database).log(
-        "update_sync_provider",
-        &id,
-        Some(format!("name={:?} enabled={:?}", name, enabled)),
-        true,
-        None,
-    )?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn delete_sync_provider(
-    state: State<'_, SharedState>,
-    id: String,
-) -> Result<(), AppError> {
-    let state = state.lock().unwrap();
-    let database = state.database.clone();
-    crate::core::database::SyncProvidersRepository::new(&database).delete(&id)?;
-    crate::core::database::AuditRepository::new(&database).log(
-        "delete_sync_provider",
-        &id,
-        None,
-        true,
-        None,
-    )?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn get_sync_history(
-    state: State<'_, SharedState>,
-    provider_id: String,
-    limit: Option<usize>,
-) -> Result<Vec<crate::core::models::SyncHistory>, AppError> {
-    let state = state.lock().unwrap();
-    let database = state.database.clone();
-    let lim = limit.unwrap_or(20);
-    crate::core::database::SyncHistoryRepository::new(&database).list_for_provider(&provider_id, lim)
-}
-
-#[tauri::command]
-pub fn get_all_sync_history(
-    state: State<'_, SharedState>,
-    limit: Option<usize>,
-) -> Result<Vec<crate::core::models::SyncHistory>, AppError> {
-    let state = state.lock().unwrap();
-    let database = state.database.clone();
-    let lim = limit.unwrap_or(20);
-    crate::core::database::SyncHistoryRepository::new(&database).list_recent(lim)
-}
-
-#[tauri::command]
-pub fn clear_sync_history(
-    state: State<'_, SharedState>,
-    provider_id: String,
-) -> Result<usize, AppError> {
-    let state = state.lock().unwrap();
-    let database = state.database.clone();
-    let removed =
-        crate::core::database::SyncHistoryRepository::new(&database).clear_for_provider(&provider_id)?;
-    crate::core::database::AuditRepository::new(&database).log(
-        "clear_sync_history",
-        &provider_id,
-        Some(format!("removed={removed}")),
-        true,
-        None,
-    )?;
-    Ok(removed)
-}
-
-#[tauri::command]
-pub fn test_sync_provider_connection(
-    state: State<'_, SharedState>,
-    provider_id: String,
-) -> Result<(), AppError> {
-    let state = state.lock().unwrap();
-    // Short-lock: fetch the provider row + credentials, then drop the
-    // guard before the network round-trip.
-    let (provider, creds) = {
-        let database = state.database.clone();
-        let provider = crate::core::database::SyncProvidersRepository::new(&database)
-            .get(&provider_id)?
-            .ok_or_else(|| AppError::Config(format!("Provider {provider_id} not found")))?;
-        let creds = read_sync_credentials(&database, &provider)?;
-        (provider, creds)
+) -> Result<SyncProvider, AppError> {
+    let kind_enum = match kind.as_str() {
+        "webdav" => SyncProviderKind::WebDav,
+        "s3" => SyncProviderKind::S3,
+        "sftp" => SyncProviderKind::Sftp,
+        _ => SyncProviderKind::WebDav,
     };
-    let concrete = build_sync_provider(&provider, creds)?;
-    concrete.test_connection()?;
-    let g = state.database.clone();
-    crate::core::database::AuditRepository::new(&g).log(
-        "test_sync_provider_connection",
-        &provider_id,
-        None,
-        true,
-        None,
-    )?;
-    Ok(())
+    let provider = SyncProvider {
+        id,
+        name,
+        kind: kind_enum,
+        config_json,
+        enabled: true,
+        last_sync_at: None,
+        last_sync_status: None,
+        last_sync_error: None,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let state = state.lock().unwrap();
+    let database = state.database.clone();
+    let repo = crate::core::database::SyncProviderRepository::new(&database);
+    repo.create(&provider)?;
+    let mut result = provider.clone();
+    if let Ok(decrypted) = repo.decrypt_config(&result.config_json) {
+        result.config_json = decrypted;
+    }
+    Ok(result)
 }
 
 #[tauri::command]
-pub fn sync_now(
+pub fn sync_delete_provider(
     state: State<'_, SharedState>,
-    provider_id: String,
+    id: String,
+) -> Result<(), AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.clone();
+    let repo = crate::core::database::SyncProviderRepository::new(&database);
+    repo.delete(&id)
+}
+
+#[tauri::command]
+pub async fn sync_test_connection(
+    state: State<'_, SharedState>,
+    id: String,
+) -> Result<(), AppError> {
+    let (provider, config_dir, _library_path) = {
+        let state = state.lock().unwrap();
+        let database = state.database.clone();
+        let repo = crate::core::database::SyncProviderRepository::new(&database);
+        let provider = repo.get(&id)?.ok_or_else(|| AppError::Config(format!("Provider not found: {}", id)))?;
+        let config_dir = state.config.lock().unwrap().library_path.parent()
+            .map(|p| p.join("sync"))
+            .unwrap_or_else(|| std::path::PathBuf::from("sync"));
+        let library_path = state.config.lock().unwrap().library_path.clone();
+        (provider, config_dir, library_path)
+    };
+
+    std::fs::create_dir_all(&config_dir)
+        .map_err(|e| AppError::Config(format!("Failed to create sync dir: {}", e)))?;
+
+    let adapter = crate::core::rclone_adapter::RcloneAdapter::new(&config_dir)?;
+    adapter.test_connection(&format!("sp_{}", &provider.id)).await
+        .map_err(|e| AppError::Sync(format!("Connection test failed: {}", e)))
+}
+
+#[tauri::command]
+pub async fn sync_start(
+    state: State<'_, SharedState>,
+    id: String,
     direction: String,
-) -> Result<crate::core::models::SyncHistory, AppError> {
-    use crate::core::sync::{run_sync_by_id, SyncDirection};
+) -> Result<SyncResult, AppError> {
+    let (provider, config_dir, library_path, database) = {
+        let state = state.lock().unwrap();
+        let database = state.database.clone();
+        let repo = crate::core::database::SyncProviderRepository::new(&database);
+        let provider = repo.get(&id)?.ok_or_else(|| AppError::Config(format!("Provider not found: {}", id)))?;
+        let config_dir = state.config.lock().unwrap().library_path.parent()
+            .map(|p| p.join("sync"))
+            .unwrap_or_else(|| std::path::PathBuf::from("sync"));
+        let library_path = state.config.lock().unwrap().library_path.clone();
+        (provider, config_dir, library_path, database)
+    };
 
+    std::fs::create_dir_all(&config_dir)
+        .map_err(|e| AppError::Config(format!("Failed to create sync dir: {}", e)))?;
+
+    let adapter = crate::core::rclone_adapter::RcloneAdapter::new(&config_dir)?;
+    let remote_name = format!("sp_{}", &provider.id);
+
+    let result = match direction.as_str() {
+        "upload" => adapter.sync_to_remote(&remote_name, &library_path, "skills/").await?,
+        "download" => adapter.sync_from_remote(&remote_name, &library_path, "skills/").await?,
+        _ => {
+            let on_progress = |_p: crate::core::models::RcloneProgress| {};
+            adapter.bisync(&remote_name, &library_path, "skills/", on_progress).await?
+        }
+    };
+
+    let status_str = match result.status {
+        SyncStatus::Success => "success",
+        SyncStatus::Failed => "failed",
+        _ => "partial",
+    };
+    let error_msg = if result.errors.is_empty() { None } else { Some(result.errors.join("; ")) };
+    let repo = crate::core::database::SyncProviderRepository::new(&database);
+    repo.update_sync_status(&id, status_str, error_msg.as_deref())?;
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn sync_get_plan(
+    state: State<'_, SharedState>,
+    id: String,
+) -> Result<SyncPlan, AppError> {
+    let (provider, config_dir, library_path) = {
+        let state = state.lock().unwrap();
+        let database = state.database.clone();
+        let repo = crate::core::database::SyncProviderRepository::new(&database);
+        let provider = repo.get(&id)?.ok_or_else(|| AppError::Config(format!("Provider not found: {}", id)))?;
+        let config_dir = state.config.lock().unwrap().library_path.parent()
+            .map(|p| p.join("sync"))
+            .unwrap_or_else(|| std::path::PathBuf::from("sync"));
+        let library_path = state.config.lock().unwrap().library_path.clone();
+        (provider, config_dir, library_path)
+    };
+
+    std::fs::create_dir_all(&config_dir)
+        .map_err(|e| AppError::Config(format!("Failed to create sync dir: {}", e)))?;
+
+    let adapter = crate::core::rclone_adapter::RcloneAdapter::new(&config_dir)?;
+    let remote_name = format!("sp_{}", &provider.id);
+
+    let mut plan = adapter.check(&remote_name, &library_path, "skills/").await?;
+    plan.provider_id = provider.id.clone();
+    plan.provider_name = provider.name.clone();
+    Ok(plan)
+}
+
+#[tauri::command]
+pub fn sync_get_history(
+    state: State<'_, SharedState>,
+    id: String,
+    limit: Option<usize>,
+) -> Result<Vec<SyncHistoryEntry>, AppError> {
     let state = state.lock().unwrap();
-    let direction = SyncDirection::parse(&direction)?;
+    let database = state.database.clone();
+    let repo = crate::core::database::SyncHistoryRepository::new(&database);
+    repo.list_for_provider(&id, limit.unwrap_or(50))
+}
 
-    // Phase 1: with the DB lock held, fetch the provider row, the
-    // archive password, the library path, and all credentials. After
-    // this block, the MutexGuard is dropped so the long-running sync
-    // IO doesn't block the rest of the app.
-    let (provider, password, library_path, creds) = {
-        let database = state.database.clone();
-        let provider = crate::core::database::SyncProvidersRepository::new(&database)
-            .get(&provider_id)?
-            .ok_or_else(|| AppError::Config(format!("Provider {provider_id} not found")))?;
-        let password = fetch_sync_password(&database)?;
-        let library_path = {
-            let cfg = crate::core::database::ConfigRepository::new(&database);
-            cfg.get("library_path")?
-                .ok_or_else(|| AppError::Config("library_path not configured".into()))
-                .map(std::path::PathBuf::from)?
-        };
-        let creds = read_sync_credentials(&database, &provider)?;
-        (provider, password, library_path, creds)
+#[tauri::command]
+pub fn sync_rclone_status(
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, AppError> {
+    let config_dir = {
+        let state = state.lock().unwrap();
+        let config = state.config.lock().unwrap();
+        config.library_path.parent()
+            .map(|p| p.join("sync"))
+            .unwrap_or_else(|| std::path::PathBuf::from("sync"))
     };
 
-    // Phase 2: build the concrete provider (no DB access) and run sync.
-    // We re-acquire the DB lock briefly inside the engine (per write);
-    // the long provider IO does not hold it.
-    let outcome = {
-        let database = state.database.clone();
-        crate::core::sync::run_sync_by_id(
-            &database,
-            &provider,
-            direction,
-            &password,
-            &library_path,
-            |db_provider| build_sync_provider(db_provider, creds),
-        )?
+    match crate::core::rclone_adapter::RcloneAdapter::find_available(&config_dir) {
+        Some(path) => Ok(serde_json::json!({
+            "installed": true,
+            "path": path.to_string_lossy().into_owned(),
+        })),
+        None => Ok(serde_json::json!({
+            "installed": false,
+            "path": null,
+            "downloadUrl": crate::core::rclone_adapter::RcloneAdapter::download_url(),
+        })),
+    }
+}
+
+#[tauri::command]
+pub async fn sync_ensure_rclone(
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, AppError> {
+    let config_dir = {
+        let state = state.lock().unwrap();
+        let config = state.config.lock().unwrap();
+        config.library_path.parent()
+            .map(|p| p.join("sync"))
+            .unwrap_or_else(|| std::path::PathBuf::from("sync"))
     };
-    Ok(outcome.history)
+
+    if let Some(path) = crate::core::rclone_adapter::RcloneAdapter::find_available(&config_dir) {
+        return Ok(serde_json::json!({
+            "installed": true,
+            "path": path.to_string_lossy().into_owned(),
+        }));
+    }
+
+    let binary_path = crate::core::rclone_adapter::RcloneAdapter::download_rclone(&config_dir).await?;
+
+    Ok(serde_json::json!({
+        "installed": true,
+        "path": binary_path.to_string_lossy().into_owned(),
+    }))
 }
 
 #[cfg(test)]

@@ -1,4 +1,3 @@
-use crate::core::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -327,104 +326,6 @@ pub struct ProjectDto {
 }
 
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SyncProviderKind {
-    GithubZip,
-    WebDav,
-}
-
-impl SyncProviderKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            SyncProviderKind::GithubZip => "github_zip",
-            SyncProviderKind::WebDav => "webdav",
-        }
-    }
-    pub fn parse(s: &str) -> Result<Self, AppError> {
-        match s {
-            "github_zip" => Ok(SyncProviderKind::GithubZip),
-            "webdav" => Ok(SyncProviderKind::WebDav),
-            other => Err(AppError::Config(format!("Unknown sync provider kind: {other}"))),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SyncDirection {
-    Upload,
-    Download,
-}
-
-impl SyncDirection {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            SyncDirection::Upload => "upload",
-            SyncDirection::Download => "download",
-        }
-    }
-    pub fn parse(s: &str) -> Result<Self, AppError> {
-        match s {
-            "upload" => Ok(SyncDirection::Upload),
-            "download" => Ok(SyncDirection::Download),
-            other => Err(AppError::Config(format!("Unknown sync direction: {other}"))),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SyncStatus {
-    Success,
-    Error,
-    Cancelled,
-}
-
-impl SyncStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            SyncStatus::Success => "success",
-            SyncStatus::Error => "error",
-            SyncStatus::Cancelled => "cancelled",
-        }
-    }
-    pub fn parse(s: &str) -> Result<Self, AppError> {
-        match s {
-            "success" => Ok(SyncStatus::Success),
-            "error" => Ok(SyncStatus::Error),
-            "cancelled" => Ok(SyncStatus::Cancelled),
-            other => Err(AppError::Config(format!("Unknown sync status: {other}"))),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncProvider {
-    pub id: String,
-    pub name: String,
-    pub kind: String,
-    pub config_json: String,
-    pub enabled: bool,
-    pub last_sync_at: Option<String>,
-    pub last_sync_status: Option<String>,
-    pub last_sync_error: Option<String>,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncHistory {
-    pub id: String,
-    pub provider_id: String,
-    pub direction: String,
-    pub status: String,
-    pub started_at: String,
-    pub finished_at: Option<String>,
-    pub bytes_transferred: Option<i64>,
-    pub skills_count: Option<i64>,
-    pub error_message: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupManifest {
     pub schema_version: u32,
@@ -439,4 +340,133 @@ pub struct BackupManifestEntry {
     pub name: String,
     pub content_sha256: String,
     pub size_bytes: u64,
+}
+
+// ── Cloud Sync Models (rclone-based) ────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SyncProviderKind {
+    WebDav,
+    S3,
+    Sftp,
+    // rclone supports 40+ backends; add more as needed
+}
+
+impl std::fmt::Display for SyncProviderKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SyncProviderKind::WebDav => write!(f, "webdav"),
+            SyncProviderKind::S3 => write!(f, "s3"),
+            SyncProviderKind::Sftp => write!(f, "sftp"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncProvider {
+    pub id: String,
+    pub name: String,
+    pub kind: SyncProviderKind,
+    /// JSON-serialized provider-specific config (URL, bucket, etc.)
+    /// Sensitive fields (password, token) are stored encrypted via Crypto.
+    pub config_json: String,
+    pub enabled: bool,
+    pub last_sync_at: Option<String>,
+    pub last_sync_status: Option<String>,
+    pub last_sync_error: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SyncDirection {
+    Upload,
+    Download,
+    Bisync,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SyncStatus {
+    Pending,
+    Running,
+    Success,
+    Failed,
+    Partial,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncHistoryEntry {
+    pub id: String,
+    pub provider_id: String,
+    pub direction: SyncDirection,
+    pub status: SyncStatus,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub bytes_transferred: Option<i64>,
+    pub skills_count: Option<i64>,
+    pub error_message: Option<String>,
+}
+
+/// Result of a dry-run sync plan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncPlan {
+    pub provider_id: String,
+    pub provider_name: String,
+    pub actions: Vec<SyncPlanAction>,
+    pub stats: SyncPlanStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SyncActionType {
+    UploadLocal,
+    DownloadRemote,
+    Conflict,
+    DeleteLocal,
+    DeleteRemote,
+    Skip,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncPlanAction {
+    pub skill_name: String,
+    pub action_type: SyncActionType,
+    pub local_mtime: Option<String>,
+    pub remote_mtime: Option<String>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncPlanStats {
+    pub upload_count: usize,
+    pub download_count: usize,
+    pub conflict_count: usize,
+    pub delete_local_count: usize,
+    pub delete_remote_count: usize,
+    pub skip_count: usize,
+}
+
+/// Result of executing a sync.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncResult {
+    pub provider_id: String,
+    pub direction: SyncDirection,
+    pub status: SyncStatus,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub bytes_transferred: i64,
+    pub skills_synced: i64,
+    pub errors: Vec<String>,
+}
+
+/// A parsed rclone JSON log line for progress reporting.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RcloneProgress {
+    pub bytes_transferred: i64,
+    pub bytes_total: i64,
+    pub percentage: f64,
+    pub speed: i64,
+    pub current_file: String,
 }

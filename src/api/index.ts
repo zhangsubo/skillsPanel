@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { Tag } from '@/types';
+import type { SyncProvider, SyncResult, SyncPlan, SyncHistoryEntry } from './sync';
 
 function isTauriEnv(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -218,6 +219,16 @@ const MOCK_COMMANDS: Record<string, (args?: Record<string, unknown>) => unknown>
   }),
   import_project_skill: () => '/mock/library/imported-skill',
   export_skill_to_project: () => undefined,
+
+  sync_list_providers: () => [] as SyncProvider[],
+  sync_add_provider: () => ({ id: 'mock', name: 'Mock Provider', kind: 'webdav', config_json: '{}', enabled: true, last_sync_at: null, last_sync_status: null, last_sync_error: null, created_at: new Date().toISOString() } as SyncProvider),
+  sync_delete_provider: () => undefined,
+  sync_test_connection: () => undefined,
+  sync_start: () => ({ provider_id: 'mock', direction: 'bisync', status: 'success', started_at: new Date().toISOString(), finished_at: new Date().toISOString(), bytes_transferred: 0, skills_synced: 0, errors: [] } as SyncResult),
+  sync_get_plan: () => ({ provider_id: 'mock', provider_name: 'Mock', actions: [], stats: { upload_count: 0, download_count: 0, conflict_count: 0, delete_local_count: 0, delete_remote_count: 0, skip_count: 0 } } as SyncPlan),
+  sync_get_history: () => [] as SyncHistoryEntry[],
+  sync_rclone_status: () => ({ installed: false, path: null, downloadUrl: 'https://downloads.rclone.org/rclone-current-darwin-arm64.tar.gz' } as import('./sync').RcloneStatus),
+  sync_ensure_rclone: () => ({ installed: true, path: '/usr/local/bin/rclone' } as import('./sync').RcloneStatus),
 };
 
 // ── Tag Mocks (browser-only, persistent across invocations) ────────
@@ -302,109 +313,6 @@ const MOCK_TAG_COMMANDS: Record<string, (args?: Record<string, unknown>) => unkn
 
 // 把 tag mocks 合并到主 MOCK_COMMANDS 里。
 for (const [cmd, handler] of Object.entries(MOCK_TAG_COMMANDS)) {
-  MOCK_COMMANDS[cmd] = handler;
-}
-
-// ── Cloud sync mocks (browser mode) ────────────────────────────────
-// In-memory fixtures so `npm run dev` works without Tauri.
-
-const MOCK_SYNC_PROVIDERS: Array<{
-  id: string;
-  name: string;
-  kind: string;
-  config_json: string;
-  enabled: boolean;
-  last_sync_at: string | null;
-  last_sync_status: string | null;
-  last_sync_error: string | null;
-  created_at: string;
-}> = [];
-
-const MOCK_SYNC_HISTORY: Array<{
-  id: string;
-  provider_id: string;
-  direction: string;
-  status: string;
-  started_at: string;
-  finished_at: string | null;
-  bytes_transferred: number | null;
-  skills_count: number | null;
-  error_message: string | null;
-}> = [];
-
-const MOCK_SYNC_COMMANDS: Record<string, (args?: Record<string, unknown>) => unknown> = {
-  list_sync_providers: () => MOCK_SYNC_PROVIDERS.slice(),
-  create_sync_provider: (args) => {
-    const id = crypto.randomUUID();
-    const provider = {
-      id,
-      name: String(args?.name ?? ''),
-      kind: String(args?.kind ?? ''),
-      config_json: String(args?.configJson ?? '{}'),
-      enabled: true,
-      last_sync_at: null,
-      last_sync_status: null,
-      last_sync_error: null,
-      created_at: new Date().toISOString(),
-    };
-    MOCK_SYNC_PROVIDERS.push(provider);
-    return provider;
-  },
-  update_sync_provider: (args) => {
-    const id = String(args?.id ?? '');
-    const provider = MOCK_SYNC_PROVIDERS.find((p) => p.id === id);
-    if (!provider) throw new Error(`Provider ${id} not found`);
-    if (typeof args?.name === 'string') provider.name = args.name;
-    if (typeof args?.configJson === 'string') provider.config_json = args.configJson;
-    if (typeof args?.enabled === 'boolean') provider.enabled = args.enabled;
-    return undefined;
-  },
-  delete_sync_provider: (args) => {
-    const id = String(args?.id ?? '');
-    const idx = MOCK_SYNC_PROVIDERS.findIndex((p) => p.id === id);
-    if (idx < 0) throw new Error(`Provider ${id} not found`);
-    MOCK_SYNC_PROVIDERS.splice(idx, 1);
-    // Cascade: drop history rows for this provider.
-    for (let i = MOCK_SYNC_HISTORY.length - 1; i >= 0; i--) {
-      if (MOCK_SYNC_HISTORY[i].provider_id === id) MOCK_SYNC_HISTORY.splice(i, 1);
-    }
-    return undefined;
-  },
-  get_sync_history: (args) => {
-    const pid = String(args?.providerId ?? '');
-    const limit = Number(args?.limit ?? 20);
-    return MOCK_SYNC_HISTORY
-      .filter((h) => h.provider_id === pid)
-      .sort((a, b) => b.started_at.localeCompare(a.started_at))
-      .slice(0, limit);
-  },
-  get_all_sync_history: (args) => {
-    const limit = Number(args?.limit ?? 20);
-    return MOCK_SYNC_HISTORY
-      .slice()
-      .sort((a, b) => b.started_at.localeCompare(a.started_at))
-      .slice(0, limit);
-  },
-  test_sync_provider_connection: () => undefined,
-  sync_now: (args) => {
-    const pid = String(args?.providerId ?? '');
-    const history = {
-      id: crypto.randomUUID(),
-      provider_id: pid,
-      direction: String(args?.direction ?? 'upload'),
-      status: 'success',
-      started_at: new Date().toISOString(),
-      finished_at: new Date().toISOString(),
-      bytes_transferred: 0,
-      skills_count: 0,
-      error_message: null,
-    };
-    MOCK_SYNC_HISTORY.push(history);
-    return history;
-  },
-};
-
-for (const [cmd, handler] of Object.entries(MOCK_SYNC_COMMANDS)) {
   MOCK_COMMANDS[cmd] = handler;
 }
 

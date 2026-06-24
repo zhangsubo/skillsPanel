@@ -226,6 +226,8 @@
   "sync.confirmDelete": "确认删除该备份目标？历史记录也会一起清除。",
   "sync.kind.githubZip": "GitHub（zip 仓库）",
   "sync.kind.webdav": "WebDAV",
+  "sync.kind.s3": "S3",
+  "sync.kind.sftp": "SFTP",
   "sync.fields.repo": "仓库",
   "sync.fields.repoPlaceholder": "user/repo 或完整 https URL",
   "sync.fields.branch": "分支",
@@ -251,5 +253,14 @@
   "sync.syncing": "正在同步…",
   "sync.clearHistory": "清空历史",
   "sync.tokenSaved": "已保存",
-  "sync.tokenNotSet": "未设置"
+  "sync.tokenNotSet": "未设置",
+  "sync.rcloneNotInstalled": "rclone 未安装",
+  "sync.rcloneNotInstalledDesc": "云备份功能需要 rclone。点击下方按钮自动下载并安装。",
+  "sync.rcloneDownloading": "正在下载 rclone…",
+  "sync.rcloneExtracting": "正在解压…",
+  "sync.rcloneInstallSuccess": "rclone 已安装",
+  "sync.rcloneInstallFailed": "安装失败",
+  "sync.rcloneDownloadRclone": "下载 rclone",
+  "sync.rcloneVersion": "rclone 版本",
+  "sync.rclonePath": "rclone 路径"
 }

@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useSync } from '@/hooks/use-sync'
-import { invokeCommand } from '@/api'
 import { getVersion } from '@tauri-apps/api/app'
 import { checkForUpdate } from '@/api/version'
 import UpdateDialog from '@/components/UpdateDialog'
@@ -33,7 +31,26 @@ import {
   Loader2,
   AlertCircle,
   Save,
+  Cloud,
+  CloudOff,
+  Download,
+  RefreshCw,
+  ArrowUpCircle,
+  ArrowDownCircle,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react'
+import {
+  syncListProviders,
+  syncDeleteProvider,
+  syncTestConnection,
+  syncStart,
+  syncRcloneStatus,
+  syncEnsureRclone,
+  type SyncProvider,
+  type RcloneStatus,
+} from '@/api/sync'
+import AddProviderDialog from '@/components/AddProviderDialog'
 
 const isTauriEnv = (): boolean =>
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
@@ -54,14 +71,6 @@ export default function Settings() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const sync = useSync()
-  const [archivePassword, setArchivePassword] = useState('')
-  const [showAddProvider, setShowAddProvider] = useState(false)
-  const [archivePwBusy, setArchivePwBusy] = useState(false)
-  const [archivePwMsg, setArchivePwMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
-  const [githubToken, setGithubToken] = useState('')
-  const [githubTokenSaved, setGithubTokenSaved] = useState<boolean | null>(null)
-  const [githubTokenBusy, setGithubTokenBusy] = useState(false)
 
   const [showAddTool, setShowAddTool] = useState(false)
   const [newToolName, setNewToolName] = useState('')
@@ -77,6 +86,39 @@ export default function Settings() {
   } | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
   const [showUpdateDialog, setShowUpdateDialog] = useState(false)
+
+  const [rcloneStatus, setRcloneStatus] = useState<RcloneStatus | null>(null)
+  const [rcloneLoading, setRcloneLoading] = useState(false)
+  const [providers, setProviders] = useState<SyncProvider[]>([])
+  const [providersLoading, setProvidersLoading] = useState(false)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [showAddProvider, setShowAddProvider] = useState(false)
+
+  const loadRcloneStatus = useCallback(async () => {
+    try {
+      const status = await syncRcloneStatus()
+      setRcloneStatus(status)
+    } catch {
+      setRcloneStatus({ installed: false, path: null })
+    }
+  }, [])
+
+  const loadProviders = useCallback(async () => {
+    setProvidersLoading(true)
+    try {
+      const list = await syncListProviders()
+      setProviders(list)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setProvidersLoading(false)
+    }
+  }, [setError])
+
+  useEffect(() => {
+    loadRcloneStatus()
+    loadProviders()
+  }, [loadRcloneStatus, loadProviders])
 
   const loadConfig = useCallback(async () => {
     setLoading(true)
@@ -95,12 +137,6 @@ export default function Settings() {
   useEffect(() => {
     loadConfig()
   }, [loadConfig])
-
-  // Probe the GitHub token status on mount so the user can tell at
-  // a glance whether their PAT is set.
-  useEffect(() => {
-    void sync.hasGitHubToken().then(setGithubTokenSaved)
-  }, [sync])
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion(''))
@@ -442,274 +478,6 @@ export default function Settings() {
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between pb-3">
-          <div>
-            <CardTitle className="text-base">{t('sync.title')}</CardTitle>
-            <p className="mt-0.5 text-xs text-muted-foreground">{t('sync.subtitle')}</p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowAddProvider(true)}
-            data-testid="sync-add-provider-btn"
-          >
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            {t('sync.addProvider')}
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {/* GitHub PAT — kept global (not per-provider) since one user
-              typically reuses the same token across all their repos.
-              Stored under SENSITIVE_KEY `github_token` (encrypted). */}
-          <div className="mb-4 rounded-lg border p-3">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">
-                {t('sync.fields.token')}
-              </label>
-              {githubTokenSaved !== null && (
-                <span
-                  data-testid="github-token-status"
-                  className={`text-[10px] ${
-                    githubTokenSaved ? 'text-green-600' : 'text-muted-foreground'
-                  }`}
-                >
-                  {githubTokenSaved ? '✓ ' + t('sync.tokenSaved') : t('sync.tokenNotSet')}
-                </span>
-              )}
-            </div>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t('sync.fields.tokenHint')}
-            </p>
-            <div className="mt-2 flex gap-2">
-              <Input
-                type="password"
-                value={githubToken}
-                onChange={(e) => setGithubToken(e.target.value)}
-                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                className="flex-1"
-                data-testid="github-token-input"
-                autoComplete="off"
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!githubToken.trim() || githubTokenBusy}
-                onClick={async () => {
-                  setGithubTokenBusy(true);
-                  try {
-                    await sync.setGitHubToken(githubToken);
-                    setGithubTokenSaved(true);
-                    setGithubToken('');
-                  } catch (e) {
-                    setGithubTokenSaved(false);
-                    console.error(e);
-                  } finally {
-                    setGithubTokenBusy(false);
-                  }
-                }}
-              >
-                {t('sync.setPassword')}
-              </Button>
-            </div>
-          </div>
-
-          {/* Archive password (encrypted via SENSITIVE_KEYS) */}
-          <div className="mb-4 rounded-lg border p-3">
-            <label className="text-sm font-medium">
-              {t('sync.archivePassword')}
-            </label>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t('sync.archivePasswordHint')}
-            </p>
-            <div className="mt-2 flex gap-2">
-              <Input
-                type="password"
-                value={archivePassword}
-                onChange={(e) => setArchivePassword(e.target.value)}
-                placeholder="••••••"
-                className="flex-1"
-                data-testid="sync-archive-password-input"
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!archivePassword.trim() || archivePwBusy}
-                onClick={async () => {
-                  setArchivePwBusy(true);
-                  setArchivePwMsg(null);
-                  try {
-                    await invokeCommand('set_config_value', {
-                      key: 'backup_archive_password',
-                      value: archivePassword,
-                    });
-                    setArchivePwMsg({ kind: 'ok', text: t('sync.archivePasswordSaved') });
-                    setArchivePassword('');
-                  } catch (e) {
-                    setArchivePwMsg({
-                      kind: 'err',
-                      text: e instanceof Error ? e.message : String(e),
-                    });
-                  } finally {
-                    setArchivePwBusy(false);
-                  }
-                }}
-              >
-                {archivePwBusy ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                ) : null}
-                {t('sync.setPassword')}
-              </Button>
-            </div>
-            {archivePwMsg && (
-              <p
-                data-testid="sync-archive-password-feedback"
-                className={`mt-2 text-xs ${
-                  archivePwMsg.kind === 'ok' ? 'text-green-600' : 'text-destructive'
-                }`}
-              >
-                {archivePwMsg.text}
-              </p>
-            )}
-          </div>
-
-          {sync.error && (
-            <p className="mb-2 text-xs text-destructive">{sync.error.message}</p>
-          )}
-
-          {sync.providers.length === 0 ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">
-              {t('sync.noProviders')}
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {sync.providers.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex items-center justify-between gap-3 rounded-lg border p-3"
-                  data-testid={`sync-provider-row-${p.id}`}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{p.name}</span>
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        {p.kind}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {t('sync.lastSync')}: {p.last_sync_at ?? t('sync.neverSynced')}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={sync.loading}
-                      onClick={() => sync.testConnection(p.id).catch(() => {})}
-                    >
-                      {t('sync.testConnection')}
-                    </Button>
-                    <Button
-                      size="sm"
-                      disabled={sync.loading}
-                      onClick={() => {
-                        sync.syncUp(p.id).catch(() => {
-                          // Error already set on the hook; the
-                          // existing `sync.error` strip below renders
-                          // the message. Re-throw is unnecessary.
-                        });
-                      }}
-                      data-testid={`sync-up-btn-${p.id}`}
-                    >
-                      {sync.loading ? (
-                        <>
-                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                          {t('sync.syncing')}
-                        </>
-                      ) : (
-                        t('sync.syncUp')
-                      )}
-                    </Button>
-                    <button
-                      type="button"
-                      aria-label={t('sync.deleteProvider')}
-                      onClick={() => {
-                        if (window.confirm(t('sync.confirmDelete'))) {
-                          void sync.remove(p.id);
-                        }
-                      }}
-                      className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Recent history — last 5 across all providers */}
-          {sync.history.length > 0 && (
-            <div className="mt-4 border-t pt-3">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-xs font-medium text-muted-foreground">
-                  {t('sync.history')}
-                </p>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 text-[10px] text-muted-foreground hover:text-destructive"
-                  onClick={() => {
-                    // Build the set of distinct provider ids in the
-                    // visible history; clearing per-provider gives the
-                    // user a finer-grained escape hatch than nuking
-                    // everything at once.
-                    const ids = Array.from(
-                      new Set(sync.history.map((h) => h.provider_id)),
-                    );
-                    void Promise.all(
-                      ids.map((id) => sync.clearHistory(id)),
-                    ).then(() => sync.refresh());
-                  }}
-                  data-testid="sync-clear-history-btn"
-                >
-                  {t('sync.clearHistory')}
-                </Button>
-              </div>
-              <div className="space-y-1">
-                {sync.history.slice(0, 5).map((h) => (
-                  <div
-                    key={h.id}
-                    className="flex items-start justify-between gap-2 text-xs"
-                    title={h.error_message ?? undefined}
-                  >
-                    <span className="text-muted-foreground">
-                      {h.started_at} · {h.direction} · {h.provider_id.slice(0, 8)}
-                      {h.status === 'error' && h.error_message && (
-                        <span className="mt-0.5 block text-destructive">
-                          {h.error_message}
-                        </span>
-                      )}
-                    </span>
-                    <span
-                      className={
-                        h.status === 'success'
-                          ? 'shrink-0 text-green-600'
-                          : h.status === 'cancelled'
-                            ? 'shrink-0 text-muted-foreground'
-                            : 'shrink-0 text-destructive'
-                      }
-                    >
-                      {h.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">{t('settings.updateCheck')}</CardTitle>
           <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.updateCheckDesc')}</p>
@@ -746,6 +514,212 @@ export default function Settings() {
           </div>
           {updateError && (
             <p className="mt-2 text-xs text-red-600">{updateError}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <div>
+            <CardTitle className="text-base">{t('sync.title')}</CardTitle>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t('sync.subtitle')}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {rcloneStatus?.installed && (
+              <Badge variant="default" className="bg-green-600 hover:bg-green-700 text-xs">
+                {t('sync.rcloneInstallSuccess')}
+              </Badge>
+            )}
+            {rcloneStatus?.installed === false && (
+              <Badge variant="destructive" className="text-xs">
+                {t('sync.rcloneNotInstalled')}
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {rcloneStatus?.installed === false && (
+            <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+              <CloudOff className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-amber-800">{t('sync.rcloneNotInstalled')}</p>
+                <p className="mt-1 text-xs text-amber-700">{t('sync.rcloneNotInstalledDesc')}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  disabled={rcloneLoading}
+                  onClick={async () => {
+                    setRcloneLoading(true)
+                    try {
+                      const status = await syncEnsureRclone()
+                      setRcloneStatus(status)
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : String(err))
+                    } finally {
+                      setRcloneLoading(false)
+                    }
+                  }}
+                >
+                  {rcloneLoading ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  {t('sync.rcloneDownloadRclone')}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {rcloneStatus?.installed && rcloneStatus.path && (
+            <p className="mb-3 text-xs text-muted-foreground">
+              {t('sync.rclonePath')}: <span className="font-mono">{rcloneStatus.path}</span>
+            </p>
+          )}
+
+          {providersLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : providers.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">{t('sync.noProviders')}</p>
+          ) : (
+            <div className="space-y-3">
+              {providers.map((provider) => {
+                const isActing = actionLoading === provider.id
+                return (
+                  <div
+                    key={provider.id}
+                    className="group rounded-lg border p-3 transition-colors hover:bg-muted/50"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <Cloud className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <span className="text-sm font-medium">{provider.name}</span>
+                          <Badge variant="secondary" className="text-xs">
+                            {t(`sync.kind.${provider.kind}`)}
+                          </Badge>
+                          {provider.last_sync_status && (
+                            <Badge
+                              variant="secondary"
+                              className={
+                                provider.last_sync_status === 'success'
+                                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                  : provider.last_sync_status === 'failed'
+                                    ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                                    : ''
+                              }
+                            >
+                              {provider.last_sync_status === 'success' && <CheckCircle2 className="mr-1 h-3 w-3" />}
+                              {provider.last_sync_status === 'failed' && <XCircle className="mr-1 h-3 w-3" />}
+                              {t(`sync.${provider.last_sync_status}`)}
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {provider.last_sync_at
+                            ? `${t('sync.lastSync')}: ${new Date(provider.last_sync_at).toLocaleString()}`
+                            : t('sync.neverSynced')}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={isActing}
+                          onClick={async () => {
+                            setActionLoading(provider.id)
+                            try {
+                              await syncTestConnection(provider.id)
+                              setError(null)
+                            } catch (err) {
+                              setError(t('sync.testConnectionFailed', { message: err instanceof Error ? err.message : String(err) }))
+                            } finally {
+                              setActionLoading(null)
+                            }
+                          }}
+                          className="flex h-7 items-center gap-1 rounded px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                          title={t('sync.testConnection')}
+                        >
+                          {isActing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                          {t('sync.testConnection')}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isActing}
+                          onClick={async () => {
+                            setActionLoading(provider.id)
+                            try {
+                              await syncStart(provider.id, 'upload')
+                              await loadProviders()
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : String(err))
+                            } finally {
+                              setActionLoading(null)
+                            }
+                          }}
+                          className="flex h-7 items-center gap-1 rounded px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                          title={t('sync.syncUp')}
+                        >
+                          {isActing ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowUpCircle className="h-3 w-3" />}
+                          {t('sync.syncUp')}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isActing}
+                          onClick={async () => {
+                            setActionLoading(provider.id)
+                            try {
+                              await syncStart(provider.id, 'download')
+                              await loadProviders()
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : String(err))
+                            } finally {
+                              setActionLoading(null)
+                            }
+                          }}
+                          className="flex h-7 items-center gap-1 rounded px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                          title={t('sync.syncDown')}
+                        >
+                          {isActing ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowDownCircle className="h-3 w-3" />}
+                          {t('sync.syncDown')}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isActing}
+                          onClick={async () => {
+                            if (!window.confirm(t('sync.confirmDelete'))) return
+                            setActionLoading(provider.id)
+                            try {
+                              await syncDeleteProvider(provider.id)
+                              await loadProviders()
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : String(err))
+                            } finally {
+                              setActionLoading(null)
+                            }
+                          }}
+                          className="flex h-7 items-center justify-center rounded text-muted-foreground hover:text-destructive disabled:opacity-50"
+                          title={t('sync.deleteProvider')}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {rcloneStatus?.installed && (
+            <div className="mt-3">
+              <Button variant="outline" size="sm" onClick={() => setShowAddProvider(true)}>
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                {t('sync.addProvider')}
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -824,206 +798,12 @@ export default function Settings() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showAddProvider} onOpenChange={(open) => !open && setShowAddProvider(false)}>
-        <AddSyncProviderDialog
-          onClose={() => setShowAddProvider(false)}
-          onCreate={async (name, kind, configJson) => {
-            try {
-              await sync.create(name, kind, configJson);
-              setShowAddProvider(false);
-            } catch (e) {
-              console.error(e);
-            }
-          }}
-        />
-      </Dialog>
+      <AddProviderDialog
+        open={showAddProvider}
+        onOpenChange={setShowAddProvider}
+        onAdded={loadProviders}
+      />
+
     </div>
   )
-}
-
-/**
- * Minimal "add provider" dialog. Renders kind-specific fields inline
- * (GitHub: repo+branch; WebDAV: url+username+password+remote_path).
- * Config is JSON-encoded before being passed to the backend.
- */
-function AddSyncProviderDialog({
-  onClose,
-  onCreate,
-}: {
-  onClose: () => void;
-  onCreate: (name: string, kind: 'github_zip' | 'webdav', configJson: string) => Promise<void>;
-}) {
-  const { t } = useTranslation();
-  const [name, setName] = useState('');
-  const [kind, setKind] = useState<'github_zip' | 'webdav'>('webdav');
-  const [repo, setRepo] = useState('');
-  const [branch, setBranch] = useState('main');
-  const [token, setToken] = useState('');
-  const [url, setUrl] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [remotePath, setRemotePath] = useState('backups');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      // Credentials go to SENSITIVE_KEYS (encrypted in DB) — config_json
-      // holds only the non-secret metadata. This keeps the on-disk record
-      // clean and ensures `build_sync_provider` always reads fresh creds
-      // from the encrypted store rather than from a stale config_json blob.
-      if (kind === 'webdav') {
-        if (username) {
-          await invokeCommand('set_config_value', {
-            key: 'webdav_username',
-            value: username,
-          });
-        }
-        if (password) {
-          await invokeCommand('set_config_value', {
-            key: 'webdav_password',
-            value: password,
-          });
-        }
-      } else if (kind === 'github_zip' && token) {
-        // GitHub PAT is stored under a single global key (per-user
-        // PAT typically applies to all repos). The provider's
-        // config_json holds only the repo + branch metadata.
-        await invokeCommand('set_config_value', {
-          key: 'github_token',
-          value: token,
-        });
-      }
-      const configJson =
-        kind === 'github_zip'
-          ? JSON.stringify({ repo, branch })
-          : JSON.stringify({ url, remote_path: remotePath });
-      await onCreate(name.trim(), kind, configJson);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>{t('sync.addProvider')}</DialogTitle>
-        <DialogDescription>{t('sync.subtitle')}</DialogDescription>
-      </DialogHeader>
-      <div className="space-y-3">
-        <div>
-          <label className="text-sm text-muted-foreground">Name</label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="personal-nextcloud" />
-        </div>
-        <div>
-          <label className="text-sm text-muted-foreground">Kind</label>
-          <div className="mt-1 flex gap-2">
-            <Button
-              type="button"
-              variant={kind === 'webdav' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setKind('webdav')}
-            >
-              {t('sync.kind.webdav')}
-            </Button>
-            <Button
-              type="button"
-              variant={kind === 'github_zip' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setKind('github_zip')}
-            >
-              {t('sync.kind.githubZip')}
-            </Button>
-          </div>
-        </div>
-        {kind === 'github_zip' ? (
-          <>
-            <div>
-              <label className="text-sm text-muted-foreground">{t('sync.fields.repo')}</label>
-              <Input
-                value={repo}
-                onChange={(e) => setRepo(e.target.value)}
-                placeholder={t('sync.fields.repoPlaceholder')}
-              />
-            </div>
-            <div>
-              <label className="text-sm text-muted-foreground">{t('sync.fields.branch')}</label>
-              <Input
-                value={branch}
-                onChange={(e) => setBranch(e.target.value)}
-                placeholder={t('sync.fields.branchPlaceholder')}
-              />
-            </div>
-            <div>
-              <label className="text-sm text-muted-foreground">{t('sync.fields.token')}</label>
-              <Input
-                type="password"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder={t('sync.fields.tokenPlaceholder')}
-                autoComplete="off"
-              />
-              <p className="mt-0.5 text-[10px] text-muted-foreground">
-                {t('sync.fields.tokenHint')}
-              </p>
-            </div>
-          </>
-        ) : (
-          <>
-            <div>
-              <label className="text-sm text-muted-foreground">{t('sync.fields.url')}</label>
-              <Input
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder={t('sync.fields.urlPlaceholder')}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-sm text-muted-foreground">{t('sync.fields.username')}</label>
-                <Input
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  autoComplete="username"
-                />
-              </div>
-              <div>
-                <label className="text-sm text-muted-foreground">{t('sync.fields.password')}</label>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="text-sm text-muted-foreground">{t('sync.fields.remotePath')}</label>
-              <Input
-                value={remotePath}
-                onChange={(e) => setRemotePath(e.target.value)}
-                placeholder={t('sync.fields.remotePathPlaceholder')}
-              />
-            </div>
-          </>
-        )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
-      </div>
-      <DialogFooter>
-        <Button variant="outline" onClick={onClose}>
-          {t('library.cancel')}
-        </Button>
-        <Button
-          onClick={submit}
-          disabled={busy || !name.trim() || (kind === 'github_zip' ? !repo.trim() : !url.trim())}
-        >
-          {t('sync.addProvider')}
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  );
 }

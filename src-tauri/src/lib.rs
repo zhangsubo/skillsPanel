@@ -18,10 +18,6 @@ pub struct AppState {
     pub library: Mutex<SkillLibrary>,
     pub audit_log: Mutex<AuditLog>,
     pub logs: Mutex<Vec<LogEntry>>,
-    // `Arc<Database>` so the sync engine can hold a clone while doing
-    // long provider IO (git push / WebDAV PUT) without pinning the
-    // connection mutex — the engine uses `Database::connection()` per
-    // call to take a short lock around DB writes.
     pub database: Arc<Database>,
     pub cancel_registry: Arc<InstallCancelRegistry>,
 }
@@ -179,15 +175,15 @@ pub fn run() {
             commands::bulk_attach_tag,
             commands::get_skill_tags,
             commands::get_all_skill_tags,
-            commands::list_sync_providers,
-            commands::create_sync_provider,
-            commands::update_sync_provider,
-            commands::delete_sync_provider,
-            commands::get_sync_history,
-            commands::get_all_sync_history,
-            commands::clear_sync_history,
-            commands::test_sync_provider_connection,
-            commands::sync_now,
+            commands::sync_list_providers,
+            commands::sync_add_provider,
+            commands::sync_delete_provider,
+            commands::sync_test_connection,
+            commands::sync_start,
+            commands::sync_get_plan,
+            commands::sync_get_history,
+            commands::sync_rclone_status,
+            commands::sync_ensure_rclone,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

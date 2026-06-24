@@ -1,7 +1,8 @@
 use crate::core::crypto::Crypto;
 use crate::core::error::AppError;
 use crate::core::models::{
-    AuditEntry, BulkAttachResult, Skill, SkillSourceType, SyncHistory, SyncProvider, Tag, Tool,
+    AuditEntry, BulkAttachResult, Skill, SkillSourceType, SyncDirection, SyncHistoryEntry,
+    SyncProvider, SyncProviderKind, SyncStatus, Tag, Tool,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
@@ -1584,270 +1585,202 @@ impl<'a> ProjectsRepository<'a> {
     }
 }
 
-// ── Sync Providers Repository ──────────────────────────────────────
-// User-defined cloud backup targets. Credentials live in the config table
-// (encrypted via SENSITIVE_KEYS) — this table only stores non-secret metadata.
-// Deleting a provider cascades to its sync_history (FK ON DELETE CASCADE).
+// ── Sync Provider Repository ──────────────────────────────────────────
 
-/// Max length of a provider's display name. Long enough for "personal-github"
-/// or "company-nextcloud", short enough to keep the UNIQUE index cheap.
-pub const MAX_PROVIDER_NAME_LEN: usize = 64;
-
-pub struct SyncProvidersRepository<'a> {
+pub struct SyncProviderRepository<'a> {
     db: &'a Database,
 }
 
-impl<'a> SyncProvidersRepository<'a> {
+impl<'a> SyncProviderRepository<'a> {
     pub fn new(db: &'a Database) -> Self {
         Self { db }
     }
 
-    /// Insert a new provider. Name must be unique.
-    pub fn create(
-        &self,
-        name: &str,
-        kind: &str,
-        config_json: &str,
-        enabled: bool,
-    ) -> Result<SyncProvider, AppError> {
-        let trimmed = name.trim();
-        if trimmed.is_empty() {
-            return Err(AppError::Config("Provider name cannot be empty".into()));
-        }
-        if trimmed.chars().any(|c| c.is_control()) {
-            return Err(AppError::Config(
-                "Provider name cannot contain control characters".into(),
-            ));
-        }
-        if trimmed.chars().count() > MAX_PROVIDER_NAME_LEN {
-            return Err(AppError::Config(format!(
-                "Provider name too long: max {MAX_PROVIDER_NAME_LEN} characters"
-            )));
-        }
-        if config_json.is_empty() {
-            return Err(AppError::Config(
-                "Provider config_json cannot be empty".into(),
-            ));
-        }
-
-        let id = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().to_rfc3339();
+    pub fn list(&self) -> Result<Vec<SyncProvider>, AppError> {
         let conn = self.db.connection();
-        conn.execute(
-            "INSERT INTO sync_providers (id, name, kind, config_json, enabled, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, trimmed, kind, config_json, enabled as i32, now],
-        )
-        .map_err(|e| {
-            if let rusqlite::Error::SqliteFailure(err, _msg) = &e {
-                if err.code == rusqlite::ErrorCode::ConstraintViolation {
-                    return AppError::Config(format!(
-                        "Provider name '{trimmed}' already exists"
-                    ));
-                }
-            }
-            AppError::Config(format!("Failed to create provider: {}", e))
-        })?;
-        Ok(SyncProvider {
-            id,
-            name: trimmed.to_string(),
-            kind: kind.to_string(),
-            config_json: config_json.to_string(),
-            enabled,
-            last_sync_at: None,
-            last_sync_status: None,
-            last_sync_error: None,
-            created_at: now,
-        })
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, kind, config_json, enabled, last_sync_at, last_sync_status, last_sync_error, created_at
+                 FROM sync_providers ORDER BY created_at",
+            )
+            .map_err(|e| AppError::Config(format!("Failed to prepare list: {}", e)))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let kind_str: String = row.get(2)?;
+                let kind = match kind_str.as_str() {
+                    "webdav" => SyncProviderKind::WebDav,
+                    "s3" => SyncProviderKind::S3,
+                    "sftp" => SyncProviderKind::Sftp,
+                    _ => SyncProviderKind::WebDav,
+                };
+                Ok(SyncProvider {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    kind,
+                    config_json: row.get(3)?,
+                    enabled: row.get::<_, i32>(4)? != 0,
+                    last_sync_at: row.get(5)?,
+                    last_sync_status: row.get(6)?,
+                    last_sync_error: row.get(7)?,
+                    created_at: row.get(8)?,
+                })
+            })
+            .map_err(|e| AppError::Config(format!("Failed to query providers: {}", e)))?;
+
+        let mut providers = Vec::new();
+        for row in rows {
+            providers.push(row.map_err(|e| AppError::Config(format!("Failed to read provider: {}", e)))?);
+        }
+        Ok(providers)
     }
 
     pub fn get(&self, id: &str) -> Result<Option<SyncProvider>, AppError> {
         let conn = self.db.connection();
-        let mut stmt = conn
-            .prepare_cached(
-                "SELECT id, name, kind, config_json, enabled, last_sync_at,
-                        last_sync_status, last_sync_error, created_at
-                 FROM sync_providers WHERE id = ?1",
-            )
-            .map_err(|e| AppError::Config(format!("Failed to prepare get provider: {}", e)))?;
-        let mut rows = stmt
-            .query(params![id])
-            .map_err(|e| AppError::Config(format!("Failed to query provider: {}", e)))?;
-        match rows.next() {
-            Ok(Some(row)) => Ok(Some(row_to_provider(row)?)),
-            Ok(None) => Ok(None),
-            Err(e) => Err(AppError::Config(format!("Failed to read provider row: {}", e))),
-        }
-    }
-
-    pub fn get_by_name(&self, name: &str) -> Result<Option<SyncProvider>, AppError> {
-        let conn = self.db.connection();
-        let mut stmt = conn
-            .prepare_cached(
-                "SELECT id, name, kind, config_json, enabled, last_sync_at,
-                        last_sync_status, last_sync_error, created_at
-                 FROM sync_providers WHERE name = ?1",
-            )
-            .map_err(|e| AppError::Config(format!("Failed to prepare get_by_name: {}", e)))?;
-        let mut rows = stmt
-            .query(params![name])
-            .map_err(|e| AppError::Config(format!("Failed to query provider: {}", e)))?;
-        match rows.next() {
-            Ok(Some(row)) => Ok(Some(row_to_provider(row)?)),
-            Ok(None) => Ok(None),
-            Err(e) => Err(AppError::Config(format!("Failed to read provider row: {}", e))),
-        }
-    }
-
-    /// List all providers, sorted by name. `enabled` filter is optional.
-    pub fn list(&self, enabled_only: bool) -> Result<Vec<SyncProvider>, AppError> {
-        let conn = self.db.connection();
-        let (sql, use_filter): (&str, bool) = if enabled_only {
-            (
-                "SELECT id, name, kind, config_json, enabled, last_sync_at,
-                        last_sync_status, last_sync_error, created_at
-                 FROM sync_providers WHERE enabled = 1 ORDER BY name",
-                true,
-            )
-        } else {
-            (
-                "SELECT id, name, kind, config_json, enabled, last_sync_at,
-                        last_sync_status, last_sync_error, created_at
-                 FROM sync_providers ORDER BY name",
-                false,
-            )
-        };
-        let mut stmt = conn
-            .prepare(sql)
-            .map_err(|e| AppError::Config(format!("Failed to prepare list providers: {}", e)))?;
-        let mapper = |row: &rusqlite::Row<'_>| -> rusqlite::Result<SyncProvider> {
-            row_to_provider(row)
-        };
-        let providers: Vec<SyncProvider> = if use_filter {
-            stmt.query_map([], mapper)?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(|e| AppError::Config(format!("Failed to read providers: {}", e)))?
-        } else {
-            stmt.query_map([], mapper)?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(|e| AppError::Config(format!("Failed to read providers: {}", e)))?
-        };
-        Ok(providers)
-    }
-
-    /// Update mutable fields. None leaves a field unchanged, Some("") clears
-    /// the nullable column. `name` is non-null so it follows the leave/change
-    /// convention (Some("") would surface as NOT NULL violation).
-    pub fn update(
-        &self,
-        id: &str,
-        name: Option<&str>,
-        config_json: Option<&str>,
-        enabled: Option<bool>,
-    ) -> Result<(), AppError> {
-        // Read-then-merge to keep the leave/clear/set semantics explicit.
-        let current = self
-            .get(id)?
-            .ok_or_else(|| AppError::Config(format!("Provider {id} not found")))?;
-
-        let new_name = match name {
-            Some(n) => {
-                let t = n.trim();
-                if t.is_empty() {
-                    return Err(AppError::Config("Provider name cannot be empty".into()));
-                }
-                if t.chars().any(|c| c.is_control()) {
-                    return Err(AppError::Config(
-                        "Provider name cannot contain control characters".into(),
-                    ));
-                }
-                if t.chars().count() > MAX_PROVIDER_NAME_LEN {
-                    return Err(AppError::Config(format!(
-                        "Provider name too long: max {MAX_PROVIDER_NAME_LEN} characters"
-                    )));
-                }
-                t.to_string()
-            }
-            None => current.name,
-        };
-        let new_config = match config_json {
-            Some(c) => {
-                if c.is_empty() {
-                    return Err(AppError::Config(
-                        "Provider config_json cannot be empty".into(),
-                    ));
-                }
-                c.to_string()
-            }
-            None => current.config_json,
-        };
-        let new_enabled = enabled.unwrap_or(current.enabled);
-
-        let conn = self.db.connection();
-        conn.execute(
-            "UPDATE sync_providers SET name = ?1, config_json = ?2, enabled = ?3 WHERE id = ?4",
-            params![new_name, new_config, new_enabled as i32, id],
+        conn.query_row(
+            "SELECT id, name, kind, config_json, enabled, last_sync_at, last_sync_status, last_sync_error, created_at
+             FROM sync_providers WHERE id = ?1",
+            params![id],
+            |row| {
+                let kind_str: String = row.get(2)?;
+                let kind = match kind_str.as_str() {
+                    "webdav" => SyncProviderKind::WebDav,
+                    "s3" => SyncProviderKind::S3,
+                    "sftp" => SyncProviderKind::Sftp,
+                    _ => SyncProviderKind::WebDav,
+                };
+                Ok(SyncProvider {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    kind,
+                    config_json: row.get(3)?,
+                    enabled: row.get::<_, i32>(4)? != 0,
+                    last_sync_at: row.get(5)?,
+                    last_sync_status: row.get(6)?,
+                    last_sync_error: row.get(7)?,
+                    created_at: row.get(8)?,
+                })
+            },
         )
-        .map_err(|e| {
-            if let rusqlite::Error::SqliteFailure(err, _msg) = &e {
-                if err.code == rusqlite::ErrorCode::ConstraintViolation {
-                    return AppError::Config(format!(
-                        "Provider name '{new_name}' already exists"
-                    ));
-                }
-            }
-            AppError::Config(format!("Failed to update provider: {}", e))
-        })?;
+        .optional()
+        .map_err(|e| AppError::Config(format!("Failed to get provider: {}", e)))
+    }
+
+    pub fn create(&self, provider: &SyncProvider) -> Result<(), AppError> {
+        let conn = self.db.connection();
+        let enabled_int: i32 = if provider.enabled { 1 } else { 0 };
+        let kind_str = provider.kind.to_string();
+
+        // Encrypt sensitive fields in config_json
+        let encrypted_config = self.encrypt_config(&provider.config_json)?;
+
+        conn.execute(
+            "INSERT INTO sync_providers (id, name, kind, config_json, enabled, last_sync_at, last_sync_status, last_sync_error, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                provider.id,
+                provider.name,
+                kind_str,
+                encrypted_config,
+                enabled_int,
+                provider.last_sync_at,
+                provider.last_sync_status,
+                provider.last_sync_error,
+                provider.created_at,
+            ],
+        )
+        .map_err(|e| AppError::Config(format!("Failed to create provider: {}", e)))?;
         Ok(())
     }
 
-    /// Update last-sync fields. Called by SyncEngine after each attempt.
-    pub fn record_last_sync(
+    pub fn update(&self, provider: &SyncProvider) -> Result<(), AppError> {
+        let conn = self.db.connection();
+        let enabled_int: i32 = if provider.enabled { 1 } else { 0 };
+        let kind_str = provider.kind.to_string();
+
+        let encrypted_config = self.encrypt_config(&provider.config_json)?;
+
+        conn.execute(
+            "UPDATE sync_providers SET name = ?1, kind = ?2, config_json = ?3, enabled = ?4, last_sync_at = ?5, last_sync_status = ?6, last_sync_error = ?7
+             WHERE id = ?8",
+            params![
+                provider.name,
+                kind_str,
+                encrypted_config,
+                enabled_int,
+                provider.last_sync_at,
+                provider.last_sync_status,
+                provider.last_sync_error,
+                provider.id,
+            ],
+        )
+        .map_err(|e| AppError::Config(format!("Failed to update provider: {}", e)))?;
+        Ok(())
+    }
+
+    pub fn delete(&self, id: &str) -> Result<(), AppError> {
+        let conn = self.db.connection();
+        conn.execute("DELETE FROM sync_providers WHERE id = ?1", params![id])
+            .map_err(|e| AppError::Config(format!("Failed to delete provider: {}", e)))?;
+        Ok(())
+    }
+
+    pub fn update_sync_status(
         &self,
         id: &str,
         status: &str,
         error: Option<&str>,
     ) -> Result<(), AppError> {
-        let now = chrono::Utc::now().to_rfc3339();
         let conn = self.db.connection();
+        let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
             "UPDATE sync_providers SET last_sync_at = ?1, last_sync_status = ?2, last_sync_error = ?3 WHERE id = ?4",
             params![now, status, error, id],
         )
-        .map_err(|e| AppError::Config(format!("Failed to record last sync: {}", e)))?;
+        .map_err(|e| AppError::Config(format!("Failed to update sync status: {}", e)))?;
         Ok(())
     }
 
-    /// Physical delete. Cascades to sync_history via FK ON DELETE CASCADE.
-    /// No-op on missing id (caller decides whether to error on the missing case).
-    pub fn delete(&self, id: &str) -> Result<(), AppError> {
-        let conn = self.db.connection();
-        let affected = conn
-            .execute("DELETE FROM sync_providers WHERE id = ?1", params![id])
-            .map_err(|e| AppError::Config(format!("Failed to delete provider: {}", e)))?;
-        if affected == 0 {
-            return Err(AppError::Config(format!("Provider {id} not found")));
+    fn encrypt_config(&self, config_json: &str) -> Result<String, AppError> {
+        if let Some(crypto) = self.db.crypto() {
+            let mut parsed: serde_json::Value = serde_json::from_str(config_json)
+                .map_err(|e| AppError::Config(format!("Invalid config JSON: {}", e)))?;
+            if let Some(obj) = parsed.as_object_mut() {
+                for key in &["password", "token", "secret_access_key", "pass"] {
+                    if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
+                        if !crate::core::crypto::Crypto::is_encrypted(val) {
+                            obj.insert((*key).to_string(), serde_json::Value::String(crypto.encrypt(val)?));
+                        }
+                    }
+                }
+            }
+            serde_json::to_string(&parsed).map_err(|e| AppError::Config(format!("Failed to serialize config: {}", e)))
+        } else {
+            Ok(config_json.to_string())
         }
-        Ok(())
+    }
+
+    pub fn decrypt_config(&self, config_json: &str) -> Result<String, AppError> {
+        if let Some(crypto) = self.db.crypto() {
+            let mut parsed: serde_json::Value = serde_json::from_str(config_json)
+                .map_err(|e| AppError::Config(format!("Invalid config JSON: {}", e)))?;
+            if let Some(obj) = parsed.as_object_mut() {
+                for key in &["password", "token", "secret_access_key", "pass"] {
+                    if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
+                        if crate::core::crypto::Crypto::is_encrypted(val) {
+                            obj.insert((*key).to_string(), serde_json::Value::String(crypto.decrypt(val)?));
+                        }
+                    }
+                }
+            }
+            serde_json::to_string(&parsed).map_err(|e| AppError::Config(format!("Failed to serialize config: {}", e)))
+        } else {
+            Ok(config_json.to_string())
+        }
     }
 }
 
-fn row_to_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<SyncProvider> {
-    Ok(SyncProvider {
-        id: row.get(0)?,
-        name: row.get(1)?,
-        kind: row.get(2)?,
-        config_json: row.get(3)?,
-        enabled: row.get::<_, i32>(4)? != 0,
-        last_sync_at: row.get(5)?,
-        last_sync_status: row.get(6)?,
-        last_sync_error: row.get(7)?,
-        created_at: row.get(8)?,
-    })
-}
-
-// ── Sync History Repository ────────────────────────────────────────
-// Append-only audit of each sync attempt. Cascades on provider delete.
+// ── Sync History Repository ──────────────────────────────────────────
 
 pub struct SyncHistoryRepository<'a> {
     db: &'a Database,
@@ -1858,67 +1791,70 @@ impl<'a> SyncHistoryRepository<'a> {
         Self { db }
     }
 
-    /// Record the start of a sync attempt. Returns the new row id.
-    pub fn record_start(
-        &self,
-        provider_id: &str,
-        direction: &str,
-    ) -> Result<String, AppError> {
-        let id = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().to_rfc3339();
+    pub fn create(&self, entry: &SyncHistoryEntry) -> Result<(), AppError> {
         let conn = self.db.connection();
-        conn.execute(
-            "INSERT INTO sync_history (id, provider_id, direction, status, started_at)
-             VALUES (?1, ?2, ?3, 'in_progress', ?4)",
-            params![id, provider_id, direction, now],
-        )
-        .map_err(|e| AppError::Config(format!("Failed to record sync start: {}", e)))?;
-        Ok(id)
-    }
+        let direction_str = match entry.direction {
+            SyncDirection::Upload => "upload",
+            SyncDirection::Download => "download",
+            SyncDirection::Bisync => "bisync",
+        };
+        let status_str = match entry.status {
+            SyncStatus::Pending => "pending",
+            SyncStatus::Running => "running",
+            SyncStatus::Success => "success",
+            SyncStatus::Failed => "failed",
+            SyncStatus::Partial => "partial",
+        };
 
-    /// Mark an in-progress history row finished. status ∈ success/error/cancelled.
-    pub fn finish(
-        &self,
-        history_id: &str,
-        status: &str,
-        bytes_transferred: Option<i64>,
-        skills_count: Option<i64>,
-        error_message: Option<&str>,
-    ) -> Result<(), AppError> {
-        let now = chrono::Utc::now().to_rfc3339();
-        let conn = self.db.connection();
         conn.execute(
-            "UPDATE sync_history SET status = ?1, finished_at = ?2, bytes_transferred = ?3,
-                                     skills_count = ?4, error_message = ?5
-             WHERE id = ?6",
-            params![status, now, bytes_transferred, skills_count, error_message, history_id],
+            "INSERT INTO sync_history (id, provider_id, direction, status, started_at, finished_at, bytes_transferred, skills_count, error_message)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                entry.id,
+                entry.provider_id,
+                direction_str,
+                status_str,
+                entry.started_at,
+                entry.finished_at,
+                entry.bytes_transferred,
+                entry.skills_count,
+                entry.error_message,
+            ],
         )
-        .map_err(|e| AppError::Config(format!("Failed to finish sync history: {}", e)))?;
+        .map_err(|e| AppError::Config(format!("Failed to create history entry: {}", e)))?;
         Ok(())
     }
 
-    /// List history rows for a provider, most recent first. Bounded by `limit`.
-    pub fn list_for_provider(
-        &self,
-        provider_id: &str,
-        limit: usize,
-    ) -> Result<Vec<SyncHistory>, AppError> {
+    pub fn list_for_provider(&self, provider_id: &str, limit: usize) -> Result<Vec<SyncHistoryEntry>, AppError> {
         let conn = self.db.connection();
         let mut stmt = conn
             .prepare(
-                "SELECT id, provider_id, direction, status, started_at, finished_at,
-                        bytes_transferred, skills_count, error_message
-                 FROM sync_history WHERE provider_id = ?1
-                 ORDER BY started_at DESC LIMIT ?2",
+                "SELECT id, provider_id, direction, status, started_at, finished_at, bytes_transferred, skills_count, error_message
+                 FROM sync_history WHERE provider_id = ?1 ORDER BY started_at DESC LIMIT ?2",
             )
-            .map_err(|e| AppError::Config(format!("Failed to prepare history list: {}", e)))?;
+            .map_err(|e| AppError::Config(format!("Failed to prepare history query: {}", e)))?;
+
         let rows = stmt
             .query_map(params![provider_id, limit as i64], |row| {
-                Ok(SyncHistory {
+                let direction_str: String = row.get(2)?;
+                let direction = match direction_str.as_str() {
+                    "upload" => SyncDirection::Upload,
+                    "download" => SyncDirection::Download,
+                    _ => SyncDirection::Bisync,
+                };
+                let status_str: String = row.get(3)?;
+                let status = match status_str.as_str() {
+                    "pending" => SyncStatus::Pending,
+                    "running" => SyncStatus::Running,
+                    "success" => SyncStatus::Success,
+                    "failed" => SyncStatus::Failed,
+                    _ => SyncStatus::Partial,
+                };
+                Ok(SyncHistoryEntry {
                     id: row.get(0)?,
                     provider_id: row.get(1)?,
-                    direction: row.get(2)?,
-                    status: row.get(3)?,
+                    direction,
+                    status,
                     started_at: row.get(4)?,
                     finished_at: row.get(5)?,
                     bytes_transferred: row.get(6)?,
@@ -1927,50 +1863,30 @@ impl<'a> SyncHistoryRepository<'a> {
                 })
             })
             .map_err(|e| AppError::Config(format!("Failed to query history: {}", e)))?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|e| AppError::Config(format!("Failed to read history: {}", e)))
+
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row.map_err(|e| AppError::Config(format!("Failed to read history: {}", e)))?);
+        }
+        Ok(entries)
     }
 
-    /// List the most recent history rows across all providers, bounded by `limit`.
-    pub fn list_recent(&self, limit: usize) -> Result<Vec<SyncHistory>, AppError> {
+    pub fn update_status(&self, id: &str, status: &SyncStatus, error: Option<&str>) -> Result<(), AppError> {
         let conn = self.db.connection();
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, provider_id, direction, status, started_at, finished_at,
-                        bytes_transferred, skills_count, error_message
-                 FROM sync_history ORDER BY started_at DESC LIMIT ?1",
-            )
-            .map_err(|e| AppError::Config(format!("Failed to prepare recent history: {}", e)))?;
-        let rows = stmt
-            .query_map(params![limit as i64], |row| {
-                Ok(SyncHistory {
-                    id: row.get(0)?,
-                    provider_id: row.get(1)?,
-                    direction: row.get(2)?,
-                    status: row.get(3)?,
-                    started_at: row.get(4)?,
-                    finished_at: row.get(5)?,
-                    bytes_transferred: row.get(6)?,
-                    skills_count: row.get(7)?,
-                    error_message: row.get(8)?,
-                })
-            })
-            .map_err(|e| AppError::Config(format!("Failed to query recent: {}", e)))?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|e| AppError::Config(format!("Failed to read recent: {}", e)))
-    }
-
-    /// Wipe every history row for a provider. Returns the count
-    /// removed. Drives the "Clear history" button in Settings.
-    pub fn clear_for_provider(&self, provider_id: &str) -> Result<usize, AppError> {
-        let conn = self.db.connection();
-        let affected = conn
-            .execute(
-                "DELETE FROM sync_history WHERE provider_id = ?1",
-                params![provider_id],
-            )
-            .map_err(|e| AppError::Config(format!("Failed to clear history: {}", e)))?;
-        Ok(affected)
+        let status_str = match status {
+            SyncStatus::Pending => "pending",
+            SyncStatus::Running => "running",
+            SyncStatus::Success => "success",
+            SyncStatus::Failed => "failed",
+            SyncStatus::Partial => "partial",
+        };
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE sync_history SET status = ?1, finished_at = ?2, error_message = ?3 WHERE id = ?4",
+            params![status_str, now, error, id],
+        )
+        .map_err(|e| AppError::Config(format!("Failed to update history status: {}", e)))?;
+        Ok(())
     }
 }
 
@@ -2775,316 +2691,5 @@ mod tests {
         let bad = "rust\ngood";
         let err = repo.create(bad, None, None).unwrap_err();
         assert!(err.to_string().contains("control"), "got: {err}");
-    }
-
-    // ── Sync provider / history tests ──────────────────────────────────
-
-    /// Seed a sync_providers row (mirrors seed_skill for tags tests).
-    fn seed_provider(db: &Database, id: &str, name: &str) {
-        SyncProvidersRepository::new(db)
-            .create(name, "webdav", r#"{"url":"http://example.com"}"#, true)
-            .unwrap();
-        // Sanity: id is generated; we just need the row to exist.
-        let _ = id;
-    }
-
-    #[test]
-    fn test_sync_migration_creates_tables() {
-        let db = create_test_database();
-        let conn = db.connection();
-
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('sync_providers','sync_history')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 2, "both sync tables should exist after migration");
-
-        let idx_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name IN
-                 ('idx_sync_history_provider','idx_sync_history_started')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(idx_count, 2, "both sync indexes should exist after migration");
-    }
-
-    #[test]
-    fn test_sync_providers_repository_crud() {
-        let db = create_test_database();
-        let repo = SyncProvidersRepository::new(&db);
-
-        // Create
-        let p = repo
-            .create("personal", "webdav", r#"{"url":"http://x"}"#, true)
-            .unwrap();
-        assert_eq!(p.name, "personal");
-        assert_eq!(p.kind, "webdav");
-        assert!(p.enabled);
-        assert!(p.last_sync_at.is_none());
-
-        // Get
-        let fetched = repo.get(&p.id).unwrap().unwrap();
-        assert_eq!(fetched.name, "personal");
-        assert_eq!(fetched.config_json, r#"{"url":"http://x"}"#);
-
-        // List sorted by name
-        let _ = repo
-            .create("work", "github_zip", r#"{"repo":"a/b"}"#, true)
-            .unwrap();
-        let list = repo.list(false).unwrap();
-        assert_eq!(list.len(), 2);
-        assert_eq!(list[0].name, "personal"); // sorted
-        assert_eq!(list[1].name, "work");
-
-        // enabled_only filter
-        repo.update(&p.id, None, None, Some(false)).unwrap();
-        let enabled = repo.list(true).unwrap();
-        assert_eq!(enabled.len(), 1);
-        assert_eq!(enabled[0].name, "work");
-
-        // Delete
-        repo.delete(&p.id).unwrap();
-        assert!(repo.get(&p.id).unwrap().is_none());
-    }
-
-    #[test]
-    fn test_sync_providers_rejects_invalid_name() {
-        let db = create_test_database();
-        let repo = SyncProvidersRepository::new(&db);
-
-        // Empty
-        let err = repo.create("", "webdav", "{}", true).unwrap_err();
-        assert!(err.to_string().contains("empty"), "got: {err}");
-
-        // Whitespace-only
-        let err = repo.create("   ", "webdav", "{}", true).unwrap_err();
-        assert!(err.to_string().contains("empty"), "got: {err}");
-
-        // Control char
-        let err = repo.create("ok\nbad", "webdav", "{}", true).unwrap_err();
-        assert!(err.to_string().contains("control"), "got: {err}");
-
-        // Overlong
-        let long = "a".repeat(MAX_PROVIDER_NAME_LEN + 1);
-        let err = repo.create(&long, "webdav", "{}", true).unwrap_err();
-        assert!(err.to_string().contains("too long"), "got: {err}");
-
-        // Empty config
-        let err = repo.create("ok", "webdav", "", true).unwrap_err();
-        assert!(err.to_string().contains("config_json"), "got: {err}");
-    }
-
-    #[test]
-    fn test_sync_providers_unique_name_constraint() {
-        let db = create_test_database();
-        let repo = SyncProvidersRepository::new(&db);
-
-        repo.create("dup", "webdav", "{}", true).unwrap();
-        let err = repo.create("dup", "webdav", "{}", true).unwrap_err();
-        assert!(
-            err.to_string().contains("already exists"),
-            "got: {err}"
-        );
-
-        // Trim before uniqueness check
-        let err = repo.create("  dup  ", "webdav", "{}", true).unwrap_err();
-        assert!(err.to_string().contains("already exists"), "got: {err}");
-    }
-
-    #[test]
-    fn test_sync_providers_update_field_conventions() {
-        let db = create_test_database();
-        let repo = SyncProvidersRepository::new(&db);
-        let p = repo
-            .create("orig", "webdav", r#"{"url":"http://a"}"#, true)
-            .unwrap();
-
-        // None leaves fields alone
-        repo.update(&p.id, None, None, None).unwrap();
-        let after = repo.get(&p.id).unwrap().unwrap();
-        assert_eq!(after.name, "orig");
-        assert_eq!(after.config_json, r#"{"url":"http://a"}"#);
-        assert!(after.enabled);
-
-        // Some("...") updates
-        repo.update(&p.id, Some("renamed"), Some(r#"{"url":"http://b"}"#), Some(false))
-            .unwrap();
-        let after = repo.get(&p.id).unwrap().unwrap();
-        assert_eq!(after.name, "renamed");
-        assert_eq!(after.config_json, r#"{"url":"http://b"}"#);
-        assert!(!after.enabled);
-    }
-
-    #[test]
-    fn test_sync_providers_record_last_sync() {
-        let db = create_test_database();
-        let repo = SyncProvidersRepository::new(&db);
-        let p = repo.create("p", "webdav", "{}", true).unwrap();
-
-        repo.record_last_sync(&p.id, "success", None).unwrap();
-        let after = repo.get(&p.id).unwrap().unwrap();
-        assert_eq!(after.last_sync_status.as_deref(), Some("success"));
-        assert!(after.last_sync_at.is_some());
-        assert!(after.last_sync_error.is_none());
-
-        repo.record_last_sync(&p.id, "error", Some("network down"))
-            .unwrap();
-        let after = repo.get(&p.id).unwrap().unwrap();
-        assert_eq!(after.last_sync_status.as_deref(), Some("error"));
-        assert_eq!(after.last_sync_error.as_deref(), Some("network down"));
-    }
-
-    #[test]
-    fn test_sync_providers_delete_cascades_history() {
-        let db = create_test_database();
-        let prov_repo = SyncProvidersRepository::new(&db);
-        let hist_repo = SyncHistoryRepository::new(&db);
-
-        let p = prov_repo.create("p", "webdav", "{}", true).unwrap();
-        let h1 = hist_repo.record_start(&p.id, "upload").unwrap();
-        hist_repo
-            .finish(&h1, "success", Some(1024), Some(3), None)
-            .unwrap();
-        let h2 = hist_repo.record_start(&p.id, "download").unwrap();
-        hist_repo
-            .finish(&h2, "error", None, None, Some("boom"))
-            .unwrap();
-
-        // Sanity: 2 history rows attached.
-        assert_eq!(hist_repo.list_for_provider(&p.id, 10).unwrap().len(), 2);
-
-        prov_repo.delete(&p.id).unwrap();
-
-        // CASCADE: rows must be gone.
-        let remaining = hist_repo.list_for_provider(&p.id, 10).unwrap();
-        assert!(remaining.is_empty(), "history must cascade-delete");
-    }
-
-    #[test]
-    fn test_sync_history_in_progress_then_finish() {
-        let db = create_test_database();
-        let prov_repo = SyncProvidersRepository::new(&db);
-        let hist_repo = SyncHistoryRepository::new(&db);
-        let p = prov_repo.create("p", "webdav", "{}", true).unwrap();
-
-        let h = hist_repo.record_start(&p.id, "upload").unwrap();
-        let row = hist_repo
-            .list_for_provider(&p.id, 10)
-            .unwrap()
-            .into_iter()
-            .find(|r| r.id == h)
-            .expect("row should exist");
-        assert_eq!(row.status, "in_progress");
-        assert!(row.finished_at.is_none());
-
-        hist_repo
-            .finish(&h, "success", Some(2048), Some(5), None)
-            .unwrap();
-        let row = hist_repo
-            .list_for_provider(&p.id, 10)
-            .unwrap()
-            .into_iter()
-            .find(|r| r.id == h)
-            .unwrap();
-        assert_eq!(row.status, "success");
-        assert!(row.finished_at.is_some());
-        assert_eq!(row.bytes_transferred, Some(2048));
-        assert_eq!(row.skills_count, Some(5));
-    }
-
-    #[test]
-    fn test_sync_history_recent_and_limit() {
-        let db = create_test_database();
-        let prov_repo = SyncProvidersRepository::new(&db);
-        let hist_repo = SyncHistoryRepository::new(&db);
-        let p = prov_repo.create("p", "webdav", "{}", true).unwrap();
-
-        // Record 5 rows
-        for _ in 0..5 {
-            let h = hist_repo.record_start(&p.id, "upload").unwrap();
-            hist_repo.finish(&h, "success", None, None, None).unwrap();
-        }
-
-        // list_for_provider with limit=3
-        let rows = hist_repo.list_for_provider(&p.id, 3).unwrap();
-        assert_eq!(rows.len(), 3);
-
-        // list_recent limit=2
-        let recent = hist_repo.list_recent(2).unwrap();
-        assert_eq!(recent.len(), 2);
-    }
-
-    #[test]
-    fn test_sync_history_clear_for_provider() {
-        let db = create_test_database();
-        let prov_repo = SyncProvidersRepository::new(&db);
-        let hist_repo = SyncHistoryRepository::new(&db);
-        let p1 = prov_repo.create("p1", "webdav", "{}", true).unwrap();
-        let p2 = prov_repo.create("p2", "webdav", "{}", true).unwrap();
-
-        // 3 rows for p1, 2 for p2
-        for _ in 0..3 {
-            let h = hist_repo.record_start(&p1.id, "upload").unwrap();
-            hist_repo.finish(&h, "success", None, None, None).unwrap();
-        }
-        for _ in 0..2 {
-            let h = hist_repo.record_start(&p2.id, "upload").unwrap();
-            hist_repo.finish(&h, "success", None, None, None).unwrap();
-        }
-        assert_eq!(hist_repo.list_for_provider(&p1.id, 100).unwrap().len(), 3);
-        assert_eq!(hist_repo.list_for_provider(&p2.id, 100).unwrap().len(), 2);
-
-        // Clear p1 only — p2 should be untouched.
-        let removed = hist_repo.clear_for_provider(&p1.id).unwrap();
-        assert_eq!(removed, 3);
-        assert!(hist_repo.list_for_provider(&p1.id, 100).unwrap().is_empty());
-        assert_eq!(hist_repo.list_for_provider(&p2.id, 100).unwrap().len(), 2);
-
-        // Calling clear again on an empty provider returns 0.
-        assert_eq!(hist_repo.clear_for_provider(&p1.id).unwrap(), 0);
-    }
-
-    #[test]
-    fn test_sync_providers_get_by_name_and_missing() {
-        let db = create_test_database();
-        let repo = SyncProvidersRepository::new(&db);
-
-        // Miss
-        assert!(repo.get_by_name("nope").unwrap().is_none());
-        assert!(repo.get("nonexistent-id").unwrap().is_none());
-
-        // Hit
-        let p = repo.create("myprov", "webdav", "{}", true).unwrap();
-        let by_name = repo.get_by_name("myprov").unwrap().unwrap();
-        assert_eq!(by_name.id, p.id);
-
-        // delete with unknown id surfaces error
-        let err = repo.delete("does-not-exist").unwrap_err();
-        assert!(err.to_string().contains("not found"), "got: {err}");
-    }
-
-    #[test]
-    fn test_sync_providers_update_missing_returns_error() {
-        let db = create_test_database();
-        let repo = SyncProvidersRepository::new(&db);
-        let err = repo.update("nope", Some("x"), None, None).unwrap_err();
-        assert!(err.to_string().contains("not found"), "got: {err}");
-    }
-
-    // Touch the helper so it's not flagged dead.
-    #[test]
-    fn test_seed_provider_helper_inserts_row() {
-        let db = create_test_database();
-        seed_provider(&db, "ignored", "seeded");
-        let p = SyncProvidersRepository::new(&db)
-            .get_by_name("seeded")
-            .unwrap()
-            .expect("seeded row should exist");
-        assert_eq!(p.kind, "webdav");
     }
 }

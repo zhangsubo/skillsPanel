@@ -215,38 +215,3 @@ export interface ProjectDto {
   skills: ProjectSkillInfo[];
   sync_health: SyncHealthDto;
 }
-
-// ── Cloud sync (user-defined providers) ────────────────────────────
-// Mirrors `crate::core::models::{SyncProvider, SyncHistory}`. Field
-// names follow snake_case (Rust serde) since the backend is the source
-// of truth. Keep these in sync with `src-tauri/src/core/models.rs`.
-
-export type SyncProviderKind = 'github_zip' | 'webdav';
-
-export interface SyncProvider {
-  id: string;
-  name: string;
-  kind: string;
-  config_json: string;
-  enabled: boolean;
-  last_sync_at: string | null;
-  last_sync_status: string | null;
-  last_sync_error: string | null;
-  created_at: string;
-}
-
-export type SyncDirection = 'upload' | 'download';
-
-export type SyncStatus = 'success' | 'error' | 'cancelled' | 'in_progress';
-
-export interface SyncHistory {
-  id: string;
-  provider_id: string;
-  direction: string;
-  status: string;
-  started_at: string;
-  finished_at: string | null;
-  bytes_transferred: number | null;
-  skills_count: number | null;
-  error_message: string | null;
-}
