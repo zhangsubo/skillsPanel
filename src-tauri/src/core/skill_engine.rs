@@ -235,11 +235,17 @@ impl SkillEngine {
         metadata: &SkillMetadata,
         library: &SkillLibrary,
     ) -> Result<PathBuf, AppError> {
+        let dest = library.skill_path(&metadata.name);
         if library.skill_exists(&metadata.name) {
+            // Source is already at the destination (local skill in library) —
+            // treat as re-install, skip copy.
+            if metadata.skill_root == dest {
+                return Ok(dest);
+            }
             return Err(AppError::Conflict(format!(
                 "同名 skill 已存在: '{}' (路径: {})",
                 metadata.name,
-                library.skill_path(&metadata.name).display()
+                dest.display()
             )));
         }
         library.add_skill(&metadata.skill_root, &metadata.name)
