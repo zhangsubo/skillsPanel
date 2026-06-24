@@ -28,6 +28,7 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { open } from '@tauri-apps/plugin-dialog'
+import BatchTagDialog from '@/components/BatchTagDialog'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 
 const isTauriEnv = (): boolean => {
@@ -47,6 +48,9 @@ function LocalInstallTab() {
   const [installing, setInstalling] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [batchTagOpen, setBatchTagOpen] = useState(false)
+  const [batchTagSkillIds, setBatchTagSkillIds] = useState<string[]>([])
+  const [batchTagName, setBatchTagName] = useState('')
 
   const setSelectedPath = (path: string) => {
     setDroppedPath(path)
@@ -115,6 +119,13 @@ function LocalInstallTab() {
       const path = droppedPath
       await installLocalSkill(path, skillName.trim() || undefined)
       setSuccess(t('installSkill.localSuccess', { name: skillName || droppedPath }))
+      // Extract skill name for batch tagging
+      const installedName = skillName.trim() || path.split('/').pop()?.replace(/\.zip$/i, '') || ''
+      if (installedName) {
+        setBatchTagSkillIds([installedName])
+        setBatchTagName(installedName)
+        setBatchTagOpen(true)
+      }
       setDroppedPath(null)
       setSelectedPathKind(null)
       setSkillName('')
@@ -211,6 +222,17 @@ function LocalInstallTab() {
           {success}
         </div>
       )}
+
+      <BatchTagDialog
+        open={batchTagOpen}
+        skillIds={batchTagSkillIds}
+        suggestedName={batchTagName}
+        onClose={() => setBatchTagOpen(false)}
+        onComplete={() => {
+          setBatchTagOpen(false)
+          setSuccess(t('installSkill.tagApplied'))
+        }}
+      />
     </div>
   )
 }
@@ -228,6 +250,9 @@ function GitInstallTab() {
   const [progress, setProgress] = useState<{ stage: string; message: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [batchTagOpen, setBatchTagOpen] = useState(false)
+  const [batchTagSkillIds, setBatchTagSkillIds] = useState<string[]>([])
+  const [batchTagName, setBatchTagName] = useState('')
 
   useEffect(() => {
     if (!isTauriEnv()) return
@@ -293,6 +318,18 @@ function GitInstallTab() {
         installedCount++
       }
       setSuccess(t('installSkill.gitSuccess', { url }))
+      // Collect installed skill names for batch tagging
+      const installedNames = candidates
+        .filter((c) => selectedIds.has(c.candidate_id) && c.valid)
+        .map((c) => c.user_name_override || c.detected_name || '')
+        .filter(Boolean)
+      if (installedNames.length > 0) {
+        setBatchTagSkillIds(installedNames)
+        // Derive tag name from git URL (repo name)
+        const repoName = url.split('/').pop()?.replace(/\.git$/, '') || url
+        setBatchTagName(repoName)
+        setBatchTagOpen(true)
+      }
       setCandidates(null)
       setSelectedIds(new Set())
       setGitUrl('')
@@ -558,6 +595,17 @@ function GitInstallTab() {
           {success}
         </div>
       )}
+
+      <BatchTagDialog
+        open={batchTagOpen}
+        skillIds={batchTagSkillIds}
+        suggestedName={batchTagName}
+        onClose={() => setBatchTagOpen(false)}
+        onComplete={() => {
+          setBatchTagOpen(false)
+          setSuccess(t('installSkill.tagApplied'))
+        }}
+      />
     </div>
   )
 }

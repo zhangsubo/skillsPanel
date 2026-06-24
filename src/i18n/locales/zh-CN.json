@@ -207,6 +207,22 @@
   "tag.filterAll": "全部",
   "tag.filterUntagged": "无标签",
 
+  "project.delete": "删除项目",
+  "project.confirmDelete": "确认删除项目「{{name}}」？项目数据将被清除，但不会删除磁盘上的文件。",
+
+  "batchTag.title": "为安装的 Skill 添加标签",
+  "batchTag.description": "已安装 {{count}} 个 Skill，是否添加标签以便管理？",
+  "batchTag.mode.suggested": "推荐",
+  "batchTag.mode.existing": "已有标签",
+  "batchTag.mode.new": "新建",
+  "batchTag.skills": "个 Skill",
+  "batchTag.noTags": "暂无标签",
+  "batchTag.newPlaceholder": "输入标签名称",
+  "batchTag.skip": "跳过",
+  "batchTag.confirm": "添加标签",
+  "batchTag.tagging": "添加中…",
+  "installSkill.tagApplied": "标签已添加",
+
   "sync.title": "云备份",
   "sync.subtitle": "通过 rclone 将 Skills 同步到 WebDAV、S3、SFTP 等云端存储。",
   "sync.addProvider": "添加备份目标",

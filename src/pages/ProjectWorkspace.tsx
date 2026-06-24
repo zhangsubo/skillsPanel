@@ -1,7 +1,9 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Search, RefreshCw, LayoutGrid, List, CheckSquare, Package, Plus, X, Check } from 'lucide-react'
+import { Search, RefreshCw, LayoutGrid, List, CheckSquare, Package, Plus, X, Check, Trash2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { deleteProject } from '@/api/projects'
 import { useProjects } from '@/hooks/use-projects'
 import { getInstalledSkillsFromDb } from '@/api/database'
 import { exportSkillToProject } from '@/api/projects'
@@ -19,6 +21,14 @@ export default function ProjectWorkspace() {
   const { t } = useTranslation()
   const { projectId } = useParams<{ projectId: string }>()
   const { projects, projectDetail, scanning, selectProject } = useProjects()
+  const navigate = useNavigate()
+
+  const handleDelete = async () => {
+    if (!projectId || !project) return
+    if (!window.confirm(t('project.confirmDelete', { name: project.name }))) return
+    await deleteProject(projectId)
+    navigate('/projects')
+  }
 
   const [searchQuery, setSearchQuery] = useState('')
   const [filterMode, setFilterMode] = useState<FilterMode>('all')
@@ -152,6 +162,9 @@ export default function ProjectWorkspace() {
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleRefresh}>
             <RefreshCw className={`h-4 w-4 ${scanning ? 'animate-spin' : ''}`} />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={handleDelete} title={t('project.delete')}>
+            <Trash2 className="h-4 w-4" />
           </Button>
           <Button
             variant="ghost"

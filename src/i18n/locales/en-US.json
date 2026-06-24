@@ -207,6 +207,22 @@
   "tag.filterAll": "All",
   "tag.filterUntagged": "Untagged",
 
+  "project.delete": "Delete Project",
+  "project.confirmDelete": "Delete project \"{{name}}\"? Project data will be cleared, but files on disk will not be deleted.",
+
+  "batchTag.title": "Tag Installed Skills",
+  "batchTag.description": "{{count}} skill(s) installed. Add a tag for organization?",
+  "batchTag.mode.suggested": "Suggested",
+  "batchTag.mode.existing": "Existing",
+  "batchTag.mode.new": "New",
+  "batchTag.skills": "skills",
+  "batchTag.noTags": "No tags yet",
+  "batchTag.newPlaceholder": "Enter tag name",
+  "batchTag.skip": "Skip",
+  "batchTag.confirm": "Add Tag",
+  "batchTag.tagging": "Adding…",
+  "installSkill.tagApplied": "Tag applied",
+
   "sync.title": "Cloud Backup",
   "sync.subtitle": "Sync your skills to WebDAV, S3, SFTP and other cloud storage via rclone.",
   "sync.addProvider": "Add Provider",
