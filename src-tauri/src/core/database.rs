@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 /// Current schema version. Bump this when adding new migration steps.
-const LATEST_VERSION: u32 = 7;
+const LATEST_VERSION: u32 = 8;
 
 /// Max length of a tag name. Long enough for human-friendly labels
 /// ("frontend / react-hooks"), short enough to keep the UNIQUE index cheap.
@@ -111,6 +111,7 @@ impl Database {
             4 => Self::migrate_v4_to_v5(conn),
             5 => Self::migrate_v5_to_v6(conn),
             6 => Self::migrate_v6_to_v7(conn),
+            7 => Self::migrate_v7_to_v8(conn),
             _ => Err(AppError::Config(format!(
                 "No migration path from version {}",
                 from_version
@@ -352,6 +353,31 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_sync_history_started ON sync_history(started_at);",
         )
         .map_err(|e| AppError::Config(format!("Failed v6→v7 migration: {}", e)))?;
+        Ok(())
+    }
+
+    /// v7 → v8: Migrate sync engine from custom WebDAV/GitHub-ZIP to rclone adapter.
+    ///
+    /// - Removes `github_zip` providers (incompatible with rclone).
+    /// - Removes orphaned `sync_history` rows for deleted providers.
+    /// - Existing `webdav` providers are kept; their credentials (previously
+    ///   stored in the config table) are merged into `config_json` at runtime
+    ///   by `Migration::migrate_sync_credentials`.
+    fn migrate_v7_to_v8(conn: &Connection) -> Result<(), AppError> {
+        // Remove github_zip providers (cascades to sync_history via FK)
+        conn.execute(
+            "DELETE FROM sync_providers WHERE kind = 'github_zip'",
+            [],
+        )
+        .map_err(|e| AppError::Config(format!("Failed to remove github_zip providers: {}", e)))?;
+
+        // Clean up orphaned history rows (in case FK cascade was disabled)
+        conn.execute(
+            "DELETE FROM sync_history WHERE provider_id NOT IN (SELECT id FROM sync_providers)",
+            [],
+        )
+        .map_err(|e| AppError::Config(format!("Failed to clean orphaned sync_history: {}", e)))?;
+
         Ok(())
     }
 
@@ -892,6 +918,13 @@ impl<'a> ConfigRepository<'a> {
         }
 
         Ok(result)
+    }
+
+    pub fn delete(&self, key: &str) -> Result<(), AppError> {
+        let conn = self.db.connection();
+        conn.execute("DELETE FROM config WHERE key = ?1", params![key])
+            .map_err(|e| AppError::Config(format!("Failed to delete config key '{}': {}", key, e)))?;
+        Ok(())
     }
 }
 

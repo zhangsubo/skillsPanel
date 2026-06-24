@@ -14,6 +14,7 @@ impl Migration {
         Self::migrate_audit_log(db, &mut result)?;
         Self::migrate_tools(db, config, &mut result)?;
         Self::migrate_library_skills(db, config, &mut result)?;
+        Self::migrate_sync_credentials(db)?;
 
         Ok(result)
     }
@@ -180,6 +181,65 @@ impl Migration {
         }
 
         result.skills_migrated = count;
+        Ok(())
+    }
+
+    /// Merge old per-key credentials (from the config table) into each
+    /// webdav provider's `config_json`. This bridges the v7 schema (where
+    /// `webdav_username` / `webdav_password` lived in the config table as
+    /// separate encrypted rows) to the v8+ model (where everything is
+    /// inside the provider's `config_json`, encrypted at the field level
+    /// by `SyncProviderRepository::encrypt_config`).
+    ///
+    /// Runs once; after the keys are removed from the config table the
+    /// function becomes a no-op.
+    fn migrate_sync_credentials(db: &Database) -> Result<(), AppError> {
+        let config_repo = crate::core::database::ConfigRepository::new(db);
+        let provider_repo = crate::core::database::SyncProviderRepository::new(db);
+
+        // ConfigRepository::get() already decrypts sensitive keys.
+        let username = config_repo.get("webdav_username").ok().flatten();
+        let password = config_repo.get("webdav_password").ok().flatten();
+
+        if username.is_none() && password.is_none() {
+            return Ok(());
+        }
+
+        let plain_user = username.unwrap_or_default();
+        let plain_pass = password.unwrap_or_default();
+
+        // Merge into each webdav provider's config_json.
+        let providers = provider_repo.list().ok().unwrap_or_default();
+        for provider in &providers {
+            if provider.kind != crate::core::models::SyncProviderKind::WebDav {
+                continue;
+            }
+            let mut config: serde_json::Value =
+                serde_json::from_str(&provider.config_json).unwrap_or(serde_json::json!({}));
+            let obj = config.as_object_mut().unwrap();
+            if !plain_user.is_empty() && !obj.contains_key("username") {
+                obj.insert("username".into(), serde_json::Value::String(plain_user.clone()));
+            }
+            if !plain_pass.is_empty() && !obj.contains_key("password") {
+                obj.insert("password".into(), serde_json::Value::String(plain_pass.clone()));
+            }
+            let new_json = serde_json::to_string(&config).unwrap_or_else(|_| provider.config_json.clone());
+            // Write directly via SQL to avoid re-encryption by the repository.
+            let conn = db.connection();
+            let _ = conn.execute(
+                "UPDATE sync_providers SET config_json = ?1 WHERE id = ?2",
+                rusqlite::params![new_json, provider.id],
+            );
+        }
+
+        // Remove old keys so this migration is idempotent.
+        let _ = config_repo.delete("webdav_username");
+        let _ = config_repo.delete("webdav_password");
+        let _ = config_repo.delete("webdav_url");
+        let _ = config_repo.delete("github_token");
+        let _ = config_repo.delete("github_repo");
+        let _ = config_repo.delete("backup_archive_password");
+
         Ok(())
     }
 }
