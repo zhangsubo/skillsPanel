@@ -26,8 +26,13 @@ export default function ProjectWorkspace() {
   const handleDelete = async () => {
     if (!projectId || !project) return
     if (!window.confirm(t('project.confirmDelete', { name: project.name }))) return
-    await deleteProject(projectId)
-    navigate('/projects')
+    try {
+      await deleteProject(projectId)
+      navigate('/projects')
+    } catch (err) {
+      console.error('Failed to delete project:', err)
+      alert(t('project.deleteFailed', { error: String(err) }))
+    }
   }
 
   const [searchQuery, setSearchQuery] = useState('')

@@ -27,7 +27,12 @@ export default function BatchTagDialog({ open, skillIds, suggestedName, onClose,
 
   useEffect(() => {
     if (open) {
-      listTags().then(setExistingTags).catch(() => {})
+      listTags()
+        .then(setExistingTags)
+        .catch((err) => {
+          console.warn('Failed to load tags:', err)
+          setExistingTags([])
+        })
       setNewTagName(suggestedName)
       setMode('suggested')
       setSelectedTagId('')
@@ -40,7 +45,10 @@ export default function BatchTagDialog({ open, skillIds, suggestedName, onClose,
       let tagId = selectedTagId
       if (mode === 'suggested' || mode === 'new') {
         const name = mode === 'suggested' ? suggestedName : newTagName.trim()
-        if (!name) return
+        if (!name) {
+          setLoading(false)
+          return
+        }
         const existing = existingTags.find((t) => t.name === name)
         if (existing) {
           tagId = existing.id
@@ -49,11 +57,15 @@ export default function BatchTagDialog({ open, skillIds, suggestedName, onClose,
           tagId = tag.id
         }
       }
-      if (!tagId) return
+      if (!tagId) {
+        setLoading(false)
+        return
+      }
       await bulkAttachTag(skillIds, tagId)
       onComplete()
     } catch (e) {
-      console.error('Batch tag failed:', e)
+      // Error handled by showing user feedback in parent component
+      throw e
     } finally {
       setLoading(false)
     }

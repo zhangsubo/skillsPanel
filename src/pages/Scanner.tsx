@@ -117,13 +117,12 @@ function LocalInstallTab() {
     setSuccess(null)
     try {
       const path = droppedPath
-      await installLocalSkill(path, skillName.trim() || undefined)
+      const installedSkillId = await installLocalSkill(path, skillName.trim() || undefined)
       setSuccess(t('installSkill.localSuccess', { name: skillName || droppedPath }))
-      // Extract skill name for batch tagging
-      const installedName = skillName.trim() || path.split('/').pop()?.replace(/\.zip$/i, '') || ''
-      if (installedName) {
-        setBatchTagSkillIds([installedName])
-        setBatchTagName(installedName)
+      // Use actual installed skill ID for batch tagging
+      if (installedSkillId) {
+        setBatchTagSkillIds([installedSkillId])
+        setBatchTagName(installedSkillId)
         setBatchTagOpen(true)
       }
       setDroppedPath(null)
@@ -309,22 +308,20 @@ function GitInstallTab() {
     try {
       const url = gitUrl.trim()
       const sub = subpath.trim() || undefined
-      let installedCount = 0
+      const installedSkillIds: string[] = []
       for (const candidate of candidates) {
         if (!selectedIds.has(candidate.candidate_id)) continue
         if (!candidate.valid) continue
         const name = candidate.user_name_override || candidate.detected_name || undefined
-        await installGitSkill(url, sub, name)
-        installedCount++
+        const installedId = await installGitSkill(url, sub, name)
+        if (installedId) {
+          installedSkillIds.push(installedId)
+        }
       }
       setSuccess(t('installSkill.gitSuccess', { url }))
-      // Collect installed skill names for batch tagging
-      const installedNames = candidates
-        .filter((c) => selectedIds.has(c.candidate_id) && c.valid)
-        .map((c) => c.user_name_override || c.detected_name || '')
-        .filter(Boolean)
-      if (installedNames.length > 0) {
-        setBatchTagSkillIds(installedNames)
+      // Use actual installed skill IDs for batch tagging
+      if (installedSkillIds.length > 0) {
+        setBatchTagSkillIds(installedSkillIds)
         // Derive tag name from git URL (repo name)
         const repoName = url.split('/').pop()?.replace(/\.git$/, '') || url
         setBatchTagName(repoName)

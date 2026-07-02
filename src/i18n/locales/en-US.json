@@ -209,6 +209,7 @@
 
   "project.delete": "Delete Project",
   "project.confirmDelete": "Delete project \"{{name}}\"? Project data will be cleared, but files on disk will not be deleted.",
+  "project.deleteFailed": "Failed to delete project: {{error}}",
 
   "batchTag.title": "Tag Installed Skills",
   "batchTag.description": "{{count}} skill(s) installed. Add a tag for organization?",
