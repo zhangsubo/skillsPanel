@@ -12,6 +12,11 @@ path = "src/main.rs"
 [[bin]]
 name = "skills-cli"
 path = "src/bin/cli.rs"
+required-features = ["cli"]
+
+[features]
+default = []
+cli = ["clap", "colored", "tabled", "indicatif"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -49,7 +54,7 @@ which = "7"
 tokio = { version = "1", features = ["process", "rt", "macros"] }
 flate2 = "1"
 tar = "0.4"
-clap = { version = "4", features = ["derive", "cargo"] }
-colored = "2"
-tabled = "0.16"
-indicatif = "0.17"
+clap = { version = "4", features = ["derive", "cargo"], optional = true }
+colored = { version = "2", optional = true }
+tabled = { version = "0.16", optional = true }
+indicatif = { version = "0.17", optional = true }
