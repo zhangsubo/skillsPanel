@@ -37,7 +37,7 @@ impl ProjectScanner {
         Ok(skills)
     }
 
-    /// 内部共享扫描逻辑：遍历 4 个 agent 目录的 skills / skills-disabled 子目录，
+    /// 内部共享扫描逻辑：遍历各 agent 目录的 skills / skills-disabled 子目录，
     /// 收集元信息 + skill_root 路径。**不**算 content_hash（由 compute_all_hashes 集中算）。
     fn scan_project_root(project_root: &str) -> Result<Vec<ProjectSkillInfo>, AppError> {
         let root = Path::new(project_root);
@@ -60,6 +60,7 @@ impl ProjectScanner {
                 ".config/opencode/skill-disabled",
             ),
             ("codex", ".codex/skills", ".codex/skills-disabled"),
+            ("agents", ".agents/skills", ".agents/skills-disabled"),
         ];
 
         for (agent, skills_dir_rel, disabled_dir_rel) in &agent_configs {
@@ -87,22 +88,18 @@ impl ProjectScanner {
             return;
         }
 
-        let entries = match fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
+        // 递归查找带 SKILL.md/skill.md 的目录，支持 skills/<namespace>/<skill> 结构。
+        // 没有 marker 的目录（如纯 namespace 目录）不会被当作 skill。
+        for path in fs_utils::find_skill_dirs(dir, &[], true) {
+            let relative_path = path
+                .strip_prefix(dir)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_else(|_| path.to_string_lossy().into_owned());
 
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-
-            let file_name = entry.file_name();
-            let name_str = file_name.to_string_lossy();
-            if name_str.starts_with('.') {
-                continue;
-            }
+            let fallback_name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
 
             let skill_md = fs_utils::find_skill_marker(&path);
             let content = skill_md.as_ref().and_then(|p| fs::read_to_string(p).ok());
@@ -112,7 +109,7 @@ impl ProjectScanner {
                     .get("name")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
-                    .unwrap_or_else(|| name_str.to_string());
+                    .unwrap_or_else(|| fallback_name.clone());
                 let desc = fm
                     .get("description")
                     .and_then(|v| v.as_str())
@@ -120,13 +117,13 @@ impl ProjectScanner {
                     .to_string();
                 (name, desc)
             } else {
-                (name_str.to_string(), String::new())
+                (fallback_name, String::new())
             };
 
             skills.push(ProjectSkillInfo {
                 name,
                 description,
-                relative_path: name_str.to_string(),
+                relative_path,
                 agent: agent.to_string(),
                 enabled,
                 content_hash: None, // phase1 不算 hash；phase2 在 command 内集中算
@@ -219,25 +216,11 @@ impl ProjectScanner {
             .find(|s| s.name == skill_name)
             .ok_or_else(|| AppError::SkillNotFound(skill_name.to_string()))?;
 
-        let source_path = Path::new(project_root)
-            .join(
-                &pskill
-                    .agent
-                    .replace("claude-code", ".claude")
-                    .replace("opencode", ".config/opencode"),
-            )
-            .join("skills")
-            .join(&pskill.relative_path);
+        // 直接使用扫描阶段记录的 skill_root（namespace 结构的准确路径），
+        // 不再从 agent 名反推目录——反推对 cursor/opencode/agents 都会拼错。
+        let source_path = pskill.skill_root.clone();
 
         if !fs_utils::is_valid_skill_dir(&source_path) {
-            // Try disabled directory
-            let disabled_path = Path::new(project_root)
-                .join(&pskill.agent.replace("claude-code", ".claude"))
-                .join("skills-disabled")
-                .join(&pskill.relative_path);
-            if fs_utils::is_valid_skill_dir(&disabled_path) {
-                return Self::install_to_center(&disabled_path, &pskill.name, database, library);
-            }
             return Err(AppError::InvalidSkill(format!(
                 "Skill '{}' not found in project",
                 skill_name
@@ -306,6 +289,7 @@ impl ProjectScanner {
             "cursor" => ".cursor/skills",
             "opencode" => ".config/opencode/skill",
             "codex" => ".codex/skills",
+            "agents" => ".agents/skills",
             _ => return Err(AppError::Validation(format!("Unknown agent: {}", agent))),
         };
 
@@ -515,5 +499,106 @@ mod tests {
         let health = ProjectScanner::compute_sync_health(&skills);
         assert_eq!(health.in_sync, 1);
         assert_eq!(health.project_only, 1);
+    }
+
+    #[test]
+    fn test_scan_agents_skills_dir() {
+        // .agents/skills 是通用 agent skills 目录，必须被项目扫描识别。
+        let temp = TempDir::new().unwrap();
+        let skill_dir = temp.path().join(".agents").join("skills").join("my-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: my-skill\ndescription: agents skill\n---\n# body",
+        )
+        .unwrap();
+
+        let skills = ProjectScanner::scan_project_skills(&temp.path().to_string_lossy()).unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "my-skill");
+        assert_eq!(skills[0].agent, "agents");
+        assert!(skills[0].enabled);
+        assert_eq!(skills[0].relative_path, "my-skill");
+    }
+
+    #[test]
+    fn test_scan_namespaced_skill() {
+        // skills/<namespace>/<skill> 结构：namespace 目录本身没有 SKILL.md，
+        // 不能被当作 skill；嵌套的 gitnexus-cli 必须被发现。
+        let temp = TempDir::new().unwrap();
+        let ns_dir = temp.path().join(".agents").join("skills").join("gitnexus");
+        let skill_dir = ns_dir.join("gitnexus-cli");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(ns_dir.join("README.md"), "# gitnexus namespace").unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: gitnexus-cli\ndescription: namespaced\n---\n# body",
+        )
+        .unwrap();
+
+        let skills = ProjectScanner::scan_project_skills(&temp.path().to_string_lossy()).unwrap();
+        assert_eq!(
+            skills.len(),
+            1,
+            "namespace 目录本身不能被列为 skill: {:?}",
+            skills.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+        assert_eq!(skills[0].name, "gitnexus-cli");
+        assert_eq!(skills[0].relative_path, "gitnexus/gitnexus-cli");
+        assert!(skills[0].skill_root.ends_with("gitnexus/gitnexus-cli"));
+    }
+
+    #[test]
+    fn test_import_namespaced_skill_to_center() {
+        // import 必须使用扫描记录的 skill_root，而不是从 agent 名反推目录。
+        use crate::core::config::AppConfig;
+
+        let temp = TempDir::new().unwrap();
+        let project_root = temp.path().join("project");
+        let skill_dir = project_root
+            .join(".agents")
+            .join("skills")
+            .join("gitnexus")
+            .join("gitnexus-cli");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: gitnexus-cli\ndescription: namespaced\n---\n# body",
+        )
+        .unwrap();
+
+        let db_dir = TempDir::new().unwrap();
+        let database = Database::new(&db_dir.path().join("test.db")).unwrap();
+
+        let library_root = temp.path().join("library");
+        let config = AppConfig {
+            library_path: library_root.clone(),
+            tools: vec![],
+            sources: vec![],
+            sync: SyncConfig {
+                mode: SyncMode::Symlink,
+            },
+            install: InstallConfig {
+                allow_zip: true,
+                allow_git: true,
+                default_sync_targets: vec![],
+            },
+            exclude_paths: vec![],
+            rules: RulesConfig::default(),
+            deleted_skills: vec![],
+            debug_logging: false,
+        };
+        let library = crate::core::library::SkillLibrary::new(&config).unwrap();
+
+        let dest = ProjectScanner::import_project_skill_to_center(
+            &database,
+            &project_root.to_string_lossy(),
+            "gitnexus-cli",
+            &library,
+        )
+        .unwrap();
+
+        assert!(library_root.join("gitnexus-cli").join("SKILL.md").exists());
+        assert!(dest.contains("gitnexus-cli"));
     }
 }

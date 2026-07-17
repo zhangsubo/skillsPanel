@@ -4,7 +4,7 @@ use crate::core::fs_utils;
 use crate::core::library::SkillLibrary;
 use crate::core::models::*;
 use crate::core::skill_engine::SkillEngine;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -16,7 +16,20 @@ impl Scanner {
         library: &SkillLibrary,
     ) -> Result<Vec<SkillWithStatus>, AppError> {
         let mut skills = Vec::new();
-        let mut seen_names = HashMap::new();
+        let mut seen_names = HashSet::new();
+
+        // 中心库优先：中心库是事实源，同名 skill 一律以中心库版本为准。
+        // 外部 source（~/.agents、~/.codex、~/.claude 等）只补充中心库没有的 skill。
+        let library_skills = library.list_skills()?;
+        for name in library_skills {
+            let lib_path = library.skill_path(&name);
+            if let Some(skill) =
+                Self::parse_skill_dir(&lib_path, "library", "local-folder", library, Some(&name))
+            {
+                seen_names.insert(name);
+                skills.push(skill);
+            }
+        }
 
         for source in &config.sources {
             if !source.enabled {
@@ -33,28 +46,11 @@ impl Scanner {
                 if let Some(skill) =
                     Self::parse_skill_dir(&dir, &source.group, "local-folder", library, None)
                 {
-                    if let Some(existing) = seen_names.get(&skill.skill.name) {
-                        if existing != &dir {
-                            continue;
-                        }
+                    if !seen_names.insert(skill.skill.name.clone()) {
+                        continue;
                     }
-                    seen_names.insert(skill.skill.name.clone(), dir);
                     skills.push(skill);
                 }
-            }
-        }
-
-        let library_skills = library.list_skills()?;
-        for name in library_skills {
-            if seen_names.contains_key(&name) {
-                continue;
-            }
-            let lib_path = library.skill_path(&name);
-            if let Some(skill) =
-                Self::parse_skill_dir(&lib_path, "library", "local-folder", library, Some(&name))
-            {
-                seen_names.insert(name, lib_path);
-                skills.push(skill);
             }
         }
 
@@ -562,5 +558,83 @@ mod tests {
             Some(SkillToolStatus::Linked) => {}
             other => panic!("expected Linked, got {:?}", other),
         }
+    }
+
+    /// 中心库是事实源：同名 skill 同时存在于外部 source 与中心库时，
+    /// 必须采用中心库版本（group == "library"），且只出现一次；
+    /// 外部 source 仅补充中心库没有的 skill。
+    #[test]
+    fn scan_sources_prefers_library_over_external_sources() {
+        use crate::core::config::AppConfig;
+
+        let temp = TempDir::new().unwrap();
+        let library_root = temp.path().join("library");
+        let source_root = temp.path().join("external");
+        fs::create_dir_all(&library_root).unwrap();
+        fs::create_dir_all(&source_root).unwrap();
+
+        // 同名 skill：中心库与外部 source 各有一份，description 不同。
+        let lib_alpha = library_root.join("alpha");
+        fs::create_dir(&lib_alpha).unwrap();
+        fs::write(
+            lib_alpha.join("SKILL.md"),
+            "---\nname: alpha\ndescription: from library\n---\n",
+        )
+        .unwrap();
+
+        let ext_alpha = source_root.join("alpha");
+        fs::create_dir(&ext_alpha).unwrap();
+        fs::write(
+            ext_alpha.join("SKILL.md"),
+            "---\nname: alpha\ndescription: from external\n---\n",
+        )
+        .unwrap();
+
+        // 外部 source 独有的 skill 仍应被发现。
+        let ext_beta = source_root.join("beta");
+        fs::create_dir(&ext_beta).unwrap();
+        fs::write(
+            ext_beta.join("SKILL.md"),
+            "---\nname: beta\ndescription: external only\n---\n",
+        )
+        .unwrap();
+
+        let config = AppConfig {
+            library_path: library_root,
+            tools: vec![],
+            sources: vec![SourceConfig {
+                path: source_root.to_string_lossy().into_owned(),
+                group: "external".into(),
+                default: true,
+                enabled: true,
+                recursive: true,
+            }],
+            sync: SyncConfig {
+                mode: SyncMode::Symlink,
+            },
+            install: InstallConfig {
+                allow_zip: true,
+                allow_git: true,
+                default_sync_targets: vec![],
+            },
+            exclude_paths: vec![],
+            rules: RulesConfig::default(),
+            deleted_skills: vec![],
+            debug_logging: false,
+        };
+
+        let library = SkillLibrary::new(&config).unwrap();
+        let skills = Scanner::scan_sources(&config, &library).unwrap();
+
+        let alphas: Vec<_> = skills.iter().filter(|s| s.skill.name == "alpha").collect();
+        assert_eq!(alphas.len(), 1, "同名 skill 只能出现一次");
+        assert_eq!(alphas[0].skill.group, "library", "同名时必须以中心库为准");
+        assert_eq!(alphas[0].skill.description, "from library");
+
+        let beta = skills
+            .iter()
+            .find(|s| s.skill.name == "beta")
+            .expect("外部 source 独有的 skill 必须保留");
+        assert_eq!(beta.skill.group, "external");
     }
 }
