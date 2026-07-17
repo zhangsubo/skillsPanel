@@ -2192,18 +2192,20 @@ mod tests {
         assert_eq!(deleted_ids[0], "soft-delete-test");
 
         // Verify: row still exists but is_deleted = 1
-        let conn = db.connection();
-        let is_deleted: i32 = conn
-            .query_row(
-                "SELECT is_deleted FROM skills WHERE id = ?1",
-                params!["soft-delete-test"],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            is_deleted, 1,
-            "Skill should be soft-deleted (is_deleted=1), not hard-deleted"
-        );
+        {
+            let conn = db.connection();
+            let is_deleted: i32 = conn
+                .query_row(
+                    "SELECT is_deleted FROM skills WHERE id = ?1",
+                    params!["soft-delete-test"],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                is_deleted, 1,
+                "Skill should be soft-deleted (is_deleted=1), not hard-deleted"
+            );
+        } // conn guard 在此释放；否则下面 get_installed() 同线程重锁 Mutex 会死锁
 
         // Verify: get_installed() should NOT return it
         let installed = repo.get_installed().unwrap();
