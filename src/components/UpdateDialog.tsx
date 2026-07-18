@@ -41,9 +41,11 @@ export default function UpdateDialog({
     } catch (e) {
       setDownloading(false)
       setProgress(0)
-      // Surface the failure to the user so they know to retry or
-      // check their network / Tauri capabilities.
-      setError(e instanceof Error ? e.message : t('updateDialog.error'))
+      // 优先展示原始错误（插件 reject 的往往不是 Error 实例而是字符串/对象），
+      // 便于定位安装/验签/重启环节的真实失败原因。
+      const raw =
+        e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e)
+      setError(raw || t('updateDialog.error'))
     }
   }
 
