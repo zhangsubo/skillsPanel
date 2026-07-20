@@ -79,13 +79,18 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.platform }}" = "macos-latest" ]; then
+            # Placeholders: building the CLI compiles this crate's build.rs,
+            # and tauri-build validates externalBin paths at that point.
             # Tauri resolves externalBin per target triple, and a universal
             # build compiles for both aarch64 and x86_64, so provide both.
+            touch skills-cli-aarch64-apple-darwin skills-cli-x86_64-apple-darwin
             cargo build --release --bin skills-cli --features cli --target aarch64-apple-darwin
             cargo build --release --bin skills-cli --features cli --target x86_64-apple-darwin
             cp target/aarch64-apple-darwin/release/skills-cli skills-cli-aarch64-apple-darwin
             cp target/x86_64-apple-darwin/release/skills-cli skills-cli-x86_64-apple-darwin
           else
+            # Placeholder for the tauri-build externalBin check (see above)
+            touch skills-cli-x86_64-pc-windows-msvc.exe
             # Build CLI (Windows outputs .exe)
             cargo build --release --bin skills-cli --features cli
             # Copy actual CLI binary with target triple suffix
