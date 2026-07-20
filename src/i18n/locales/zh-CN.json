@@ -208,6 +208,7 @@
   "tag.filterUntagged": "无标签",
 
   "project.delete": "删除项目",
+  "project.deleteTitle": "删除项目",
   "project.confirmDelete": "确认删除项目「{{name}}」？项目数据将被清除，但不会删除磁盘上的文件。",
   "project.deleteFailed": "删除项目失败：{{error}}",
 

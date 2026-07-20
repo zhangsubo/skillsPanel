@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Search, RefreshCw, LayoutGrid, List, CheckSquare, Package, Plus, X, Check, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { deleteProject } from '@/api/projects'
+import { confirm } from '@tauri-apps/plugin-dialog'
 import { useProjects } from '@/hooks/use-projects'
 import { getInstalledSkillsFromDb } from '@/api/database'
 import { exportSkillToProject } from '@/api/projects'
@@ -20,15 +20,24 @@ type ViewMode = 'grid' | 'list'
 export default function ProjectWorkspace() {
   const { t } = useTranslation()
   const { projectId } = useParams<{ projectId: string }>()
-  const { projects, projectDetail, scanning, selectProject } = useProjects()
+  const { projects, projectDetail, scanning, selectProject, removeProject } = useProjects()
   const navigate = useNavigate()
 
   const handleDelete = async () => {
     if (!projectId || !project) return
-    if (!window.confirm(t('project.confirmDelete', { name: project.name }))) return
+    const confirmed = await confirm(t('project.confirmDelete', { name: project.name }), {
+      title: t('project.deleteTitle'),
+      kind: 'warning',
+    })
+    if (!confirmed) return
     try {
-      await deleteProject(projectId)
-      navigate('/projects')
+      // 先导航到首页，避免删除过程中渲染问题
+      navigate('/')
+      // 然后删除项目（异步执行，不阻塞导航）
+      removeProject(projectId).catch((err) => {
+        console.error('Failed to delete project:', err)
+        alert(t('project.deleteFailed', { error: String(err) }))
+      })
     } catch (err) {
       console.error('Failed to delete project:', err)
       alert(t('project.deleteFailed', { error: String(err) }))

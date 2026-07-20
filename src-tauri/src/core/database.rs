@@ -1600,6 +1600,33 @@ impl<'a> ProjectsRepository<'a> {
     }
 
     pub fn delete(&self, id: &str) -> Result<(), AppError> {
+        // 先获取项目信息，需要 root_path 来删除 skill 文件夹
+        let project = self.get_by_id(id)?;
+
+        if let Some(proj) = project {
+            // 删除项目目录下的 skill 文件夹（.claude/skills, .cursor/skills 等）
+            let root = std::path::Path::new(&proj.root_path);
+            let agent_skill_dirs = vec![
+                ".claude/skills",
+                ".claude/skills-disabled",
+                ".cursor/skills",
+                ".cursor/skills-disabled",
+                ".config/opencode/skill",
+                ".config/opencode/skill-disabled",
+            ];
+
+            for dir in agent_skill_dirs {
+                let skill_path = root.join(dir);
+                if skill_path.exists() {
+                    if let Err(e) = std::fs::remove_dir_all(&skill_path) {
+                        // 记录错误但不阻止删除操作
+                        eprintln!("Warning: Failed to delete skill directory {}: {}", skill_path.display(), e);
+                    }
+                }
+            }
+        }
+
+        // 删除数据库记录
         let conn = self.db.connection();
         conn.execute("DELETE FROM projects WHERE id = ?1", params![id])
             .map_err(|e| AppError::Config(format!("Failed to delete project: {}", e)))?;
@@ -2726,5 +2753,88 @@ mod tests {
         let bad = "rust\ngood";
         let err = repo.create(bad, None, None).unwrap_err();
         assert!(err.to_string().contains("control"), "got: {err}");
+    }
+
+    // ── ProjectsRepository Tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_delete_project_removes_skill_directories() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let db = create_test_database();
+
+        // 创建临时项目目录
+        let project_dir = TempDir::new().unwrap();
+        let project_path = project_dir.path();
+
+        // 创建项目中的 skill 目录
+        let skill_dirs = vec![
+            ".claude/skills",
+            ".claude/skills-disabled",
+            ".cursor/skills",
+            ".cursor/skills-disabled",
+        ];
+
+        for dir in &skill_dirs {
+            let skill_path = project_path.join(dir);
+            fs::create_dir_all(&skill_path).unwrap();
+
+            // 在每个目录中创建一个测试文件
+            let test_file = skill_path.join("test.txt");
+            fs::write(&test_file, "test content").unwrap();
+        }
+
+        // 创建项目记录
+        let repo = ProjectsRepository::new(&db);
+        let project_id = uuid::Uuid::new_v4().to_string();
+
+        repo.create(&project_id, "Test Project", project_path.to_str().unwrap())
+            .unwrap();
+
+        // 验证 skill 目录存在
+        for dir in &skill_dirs {
+            let skill_path = project_path.join(dir);
+            assert!(skill_path.exists(), "Skill directory should exist before deletion");
+        }
+
+        // 删除项目
+        repo.delete(&project_id).unwrap();
+
+        // 验证 skill 目录已被删除
+        for dir in &skill_dirs {
+            let skill_path = project_path.join(dir);
+            assert!(!skill_path.exists(), "Skill directory {} should be deleted", dir);
+        }
+
+        // 验证数据库记录已删除
+        let project = repo.get_by_id(&project_id).unwrap();
+        assert!(project.is_none(), "Project should be deleted from database");
+    }
+
+    #[test]
+    fn test_delete_project_succeeds_even_if_skill_dirs_dont_exist() {
+        use tempfile::TempDir;
+
+        let db = create_test_database();
+
+        // 创建临时项目目录（但不创建 skill 子目录）
+        let project_dir = TempDir::new().unwrap();
+        let project_path = project_dir.path();
+
+        // 创建项目记录
+        let repo = ProjectsRepository::new(&db);
+        let project_id = uuid::Uuid::new_v4().to_string();
+
+        repo.create(&project_id, "Test Project", project_path.to_str().unwrap())
+            .unwrap();
+
+        // 删除项目（即使没有 skill 目录也应该成功）
+        let result = repo.delete(&project_id);
+        assert!(result.is_ok(), "Delete should succeed even without skill directories");
+
+        // 验证数据库记录已删除
+        let project = repo.get_by_id(&project_id).unwrap();
+        assert!(project.is_none(), "Project should be deleted from database");
     }
 }

@@ -75,6 +75,17 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2"
 
+      - name: Build CLI
+        run: |
+          # Create placeholder for Tauri externalBin check
+          mkdir -p target/release
+          touch skills-cli-${{ matrix.platform == 'macos-latest' && 'universal-apple-darwin' || 'x86_64-pc-windows-msvc.exe' }}
+          # Build CLI
+          cargo build --release --bin skills-cli --features cli
+          # Copy actual CLI binary with target triple suffix
+          cp target/release/skills-cli skills-cli-${{ matrix.platform == 'macos-latest' && 'universal-apple-darwin' || 'x86_64-pc-windows-msvc.exe' }}
+        working-directory: src-tauri
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:

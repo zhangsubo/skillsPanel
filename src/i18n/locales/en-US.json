@@ -208,6 +208,7 @@
   "tag.filterUntagged": "Untagged",
 
   "project.delete": "Delete Project",
+  "project.deleteTitle": "Delete Project",
   "project.confirmDelete": "Delete project \"{{name}}\"? Project data will be cleared, but files on disk will not be deleted.",
   "project.deleteFailed": "Failed to delete project: {{error}}",
 

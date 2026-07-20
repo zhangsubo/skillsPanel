@@ -31,6 +31,19 @@ trap cleanup EXIT
 echo "{\"version\":\"${DEV_VERSION}\"}" > "$DEV_CONFIG"
 
 echo ""
+echo "=== Building Skills CLI for aarch64-apple-darwin ==="
+echo ""
+
+cd src-tauri
+# Create placeholder for Tauri externalBin check
+touch skills-cli-aarch64-apple-darwin
+# Build CLI
+cargo build --release --bin skills-cli --features cli --target aarch64-apple-darwin
+# Copy actual CLI binary with target triple suffix
+cp target/aarch64-apple-darwin/release/skills-cli skills-cli-aarch64-apple-darwin
+cd ..
+
+echo ""
 echo "=== Building Skills Panel v${DEV_VERSION} for aarch64-apple-darwin (debug) ==="
 echo ""
 
