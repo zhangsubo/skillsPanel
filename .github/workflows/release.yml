@@ -76,14 +76,23 @@ jobs:
         run: cargo install tauri-cli --version "^2"
 
       - name: Build CLI
+        shell: bash
         run: |
           # Create placeholder for Tauri externalBin check
           mkdir -p target/release
-          touch skills-cli-${{ matrix.platform == 'macos-latest' && 'universal-apple-darwin' || 'x86_64-pc-windows-msvc.exe' }}
-          # Build CLI
-          cargo build --release --bin skills-cli --features cli
-          # Copy actual CLI binary with target triple suffix
-          cp target/release/skills-cli skills-cli-${{ matrix.platform == 'macos-latest' && 'universal-apple-darwin' || 'x86_64-pc-windows-msvc.exe' }}
+          if [ "${{ matrix.platform }}" = "macos-latest" ]; then
+            touch skills-cli-universal-apple-darwin
+            # Build CLI
+            cargo build --release --bin skills-cli --features cli
+            # Copy actual CLI binary with target triple suffix
+            cp target/release/skills-cli skills-cli-universal-apple-darwin
+          else
+            touch skills-cli-x86_64-pc-windows-msvc.exe
+            # Build CLI (Windows outputs .exe)
+            cargo build --release --bin skills-cli --features cli
+            # Copy actual CLI binary with target triple suffix
+            cp target/release/skills-cli.exe skills-cli-x86_64-pc-windows-msvc.exe
+          fi
         working-directory: src-tauri
 
       - name: Build and release
