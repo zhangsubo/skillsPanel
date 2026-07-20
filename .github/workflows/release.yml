@@ -78,16 +78,14 @@ jobs:
       - name: Build CLI
         shell: bash
         run: |
-          # Create placeholder for Tauri externalBin check
-          mkdir -p target/release
           if [ "${{ matrix.platform }}" = "macos-latest" ]; then
-            touch skills-cli-universal-apple-darwin
-            # Build CLI
-            cargo build --release --bin skills-cli --features cli
-            # Copy actual CLI binary with target triple suffix
-            cp target/release/skills-cli skills-cli-universal-apple-darwin
+            # Tauri resolves externalBin per target triple, and a universal
+            # build compiles for both aarch64 and x86_64, so provide both.
+            cargo build --release --bin skills-cli --features cli --target aarch64-apple-darwin
+            cargo build --release --bin skills-cli --features cli --target x86_64-apple-darwin
+            cp target/aarch64-apple-darwin/release/skills-cli skills-cli-aarch64-apple-darwin
+            cp target/x86_64-apple-darwin/release/skills-cli skills-cli-x86_64-apple-darwin
           else
-            touch skills-cli-x86_64-pc-windows-msvc.exe
             # Build CLI (Windows outputs .exe)
             cargo build --release --bin skills-cli --features cli
             # Copy actual CLI binary with target triple suffix
