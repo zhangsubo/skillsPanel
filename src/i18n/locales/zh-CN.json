@@ -176,6 +176,7 @@
   "project.description": "管理该仓库中各 Agent 的本地 Skills，并与 Skills 中心双向同步。",
   "project.addSkill": "添加 Skill",
   "project.addSkillDesc": "从中央仓库选择 Skills 导出到此项目。",
+  "project.targetAgent": "目标工具",
   "project.selected": "个已选择",
   "project.searchPlaceholder": "搜索项目中的 Skills...",
   "project.filter.all": "全部",

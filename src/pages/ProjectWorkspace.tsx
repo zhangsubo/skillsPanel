@@ -12,6 +12,13 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import type { ProjectSkillInfo, Skill } from '@/types'
 
 type FilterMode = 'all' | 'enabled' | 'disabled'
@@ -380,6 +387,7 @@ function AddSkillToProjectDialog({
   const [searchQuery, setSearchQuery] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [submitting, setSubmitting] = useState(false)
+  const [targetAgent, setTargetAgent] = useState<string>('claude-code')
 
   useEffect(() => {
     let cancelled = false
@@ -423,7 +431,7 @@ function AddSkillToProjectDialog({
     setError(null)
     try {
       for (const name of selected) {
-        await exportSkillToProject(projectId, name, 'claude-code')
+        await exportSkillToProject(projectId, name, targetAgent)
       }
       onAdded()
     } catch (err) {
@@ -446,14 +454,34 @@ function AddSkillToProjectDialog({
           {t('project.addSkillDesc')}
         </p>
 
-        <div className="relative mt-4">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder={t('project.searchPlaceholder')}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
+        <div className="mt-4 space-y-3">
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-foreground">
+              {t('project.targetAgent')}
+            </label>
+            <Select value={targetAgent} onValueChange={setTargetAgent}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="claude-code">Claude Code</SelectItem>
+                <SelectItem value="cursor">Cursor</SelectItem>
+                <SelectItem value="opencode">OpenCode</SelectItem>
+                <SelectItem value="codex">Codex</SelectItem>
+                <SelectItem value="agents">Agents</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder={t('project.searchPlaceholder')}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
         </div>
 
         <div className="mt-3 flex-1 overflow-y-auto">
