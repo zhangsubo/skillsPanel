@@ -727,7 +727,22 @@ export default function Settings() {
       <div className="mt-auto border-t border-border pt-6 pb-2">
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           <img src={appIconUrl} alt="Skills Panel" className="h-5 w-5" />
-          <span className="font-medium">{t('settings.footer')}</span>
+          <button
+            type="button"
+            onClick={async () => {
+              if (!isTauriEnv()) {
+                window.open('https://github.com/zhangsubo/skillsPanel', '_blank')
+                return
+              }
+              try {
+                const { open } = await import('@tauri-apps/plugin-shell')
+                await open('https://github.com/zhangsubo/skillsPanel')
+              } catch {}
+            }}
+            className="font-medium cursor-pointer hover:text-foreground hover:underline transition-colors"
+          >
+            {t('settings.footer')}
+          </button>
           <span className="text-xs">{version}</span>
         </div>
         <p className="mt-1 text-xs text-muted-foreground/60">@zhangsubo.cn</p>
