@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Search, RefreshCw, LayoutGrid, List, CheckSquare, Package, Plus, X, Check, Trash2 } from 'lucide-react'
+import { Search, RefreshCw, LayoutGrid, List, CheckSquare, Package, Plus, X, Check, Trash2, Edit } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { confirm } from '@tauri-apps/plugin-dialog'
 import { useProjects } from '@/hooks/use-projects'
@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { AgentCheckboxGroup } from '@/components/project/AgentCheckboxGroup'
 import { SkillActionMenu } from '@/components/project/SkillActionMenu'
 import { EditSkillAgentsDialog } from '@/components/project/EditSkillAgentsDialog'
+import { BatchEditAgentsDialog } from '@/components/project/BatchEditAgentsDialog'
 import type { ProjectSkillInfo, Skill } from '@/types'
 
 type FilterMode = 'all' | 'enabled' | 'disabled'
@@ -53,6 +54,7 @@ export default function ProjectWorkspace() {
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set())
   const [showAddSkillDialog, setShowAddSkillDialog] = useState(false)
   const [editingSkill, setEditingSkill] = useState<{ name: string; agent: string } | null>(null)
+  const [showBatchEditDialog, setShowBatchEditDialog] = useState(false)
 
   const project = projects.find((p) => p.id === projectId)
 
@@ -117,6 +119,31 @@ export default function ProjectWorkspace() {
       await handleRefresh()
     } catch (err) {
       alert(`导入失败: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  const handleBatchDelete = async () => {
+    if (!projectId || selectedSkills.size === 0) return
+
+    const confirmed = await confirm(
+      t('project.confirmBatchDelete', { count: selectedSkills.size }),
+      {
+        title: t('project.batchDelete'),
+        kind: 'warning',
+      }
+    )
+    if (!confirmed) return
+
+    try {
+      const skillsToDelete = projectDetail?.skills.filter((s) => selectedSkills.has(s.name)) || []
+      for (const skill of skillsToDelete) {
+        await deleteProjectSkill(projectId, skill.name, skill.agent)
+      }
+      alert(t('project.batchDeleted', { count: skillsToDelete.length }))
+      setSelectedSkills(new Set())
+      await handleRefresh()
+    } catch (err) {
+      alert(`批量删除失败: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -206,6 +233,27 @@ export default function ProjectWorkspace() {
 
         {/* View actions */}
         <div className="flex items-center gap-1">
+          {selectedSkills.size > 0 && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleBatchDelete}
+                className="text-destructive hover:text-destructive"
+              >
+                <Trash2 className="mr-1 h-4 w-4" />
+                {t('project.batchDelete')} ({selectedSkills.size})
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowBatchEditDialog(true)}
+              >
+                <Edit className="mr-1 h-4 w-4" />
+                {t('project.batchEditAgents')}
+              </Button>
+            </>
+          )}
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleRefresh}>
             <RefreshCw className={`h-4 w-4 ${scanning ? 'animate-spin' : ''}`} />
           </Button>
@@ -300,6 +348,19 @@ export default function ProjectWorkspace() {
           onClose={() => setEditingSkill(null)}
           onUpdated={() => {
             setEditingSkill(null)
+            handleRefresh()
+          }}
+        />
+      )}
+
+      {showBatchEditDialog && projectId && projectDetail && (
+        <BatchEditAgentsDialog
+          projectId={projectId}
+          skills={projectDetail.skills.filter((s) => selectedSkills.has(s.name))}
+          onClose={() => setShowBatchEditDialog(false)}
+          onUpdated={() => {
+            setShowBatchEditDialog(false)
+            setSelectedSkills(new Set())
             handleRefresh()
           }}
         />
