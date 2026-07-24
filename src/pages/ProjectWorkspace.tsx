@@ -6,13 +6,14 @@ import { useNavigate } from 'react-router-dom'
 import { confirm } from '@tauri-apps/plugin-dialog'
 import { useProjects } from '@/hooks/use-projects'
 import { getInstalledSkillsFromDb } from '@/api/database'
-import { exportSkillToProjectMulti } from '@/api/projects'
+import { exportSkillToProjectMulti, deleteProjectSkill, importProjectSkill } from '@/api/projects'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AgentCheckboxGroup } from '@/components/project/AgentCheckboxGroup'
+import { SkillActionMenu } from '@/components/project/SkillActionMenu'
 import type { ProjectSkillInfo, Skill } from '@/types'
 
 type FilterMode = 'all' | 'enabled' | 'disabled'
@@ -87,6 +88,34 @@ export default function ProjectWorkspace() {
 
   const handleRefresh = async () => {
     if (projectId) await selectProject(projectId)
+  }
+
+  const handleDeleteSkill = async (skillName: string, agent: string) => {
+    if (!projectId) return
+    const confirmed = await confirm(t('project.confirmDeleteSkill', { name: skillName }), {
+      title: t('project.deleteSkillTitle'),
+      kind: 'warning',
+    })
+    if (!confirmed) return
+
+    try {
+      await deleteProjectSkill(projectId, skillName, agent)
+      alert(t('project.skillDeleted', { name: skillName, agent }))
+      await handleRefresh()
+    } catch (err) {
+      alert(`删除失败: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  const handleImportToCenter = async (skillName: string) => {
+    if (!projectId) return
+    try {
+      await importProjectSkill(projectId, skillName)
+      alert(t('installSkill.importedOne', { name: skillName }))
+      await handleRefresh()
+    } catch (err) {
+      alert(`导入失败: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   if (!project && !scanning) {
@@ -227,6 +256,12 @@ export default function ProjectWorkspace() {
               skill={skill}
               selected={selectedSkills.has(skill.name)}
               onSelect={() => toggleSkillSelection(skill.name)}
+              onDeleteSkill={handleDeleteSkill}
+              onEditAgents={() => {
+                // TODO: Phase 6 - Open EditSkillAgentsDialog
+                alert('修改工具功能即将推出')
+              }}
+              onImportToCenter={handleImportToCenter}
             />
           ))}
         </div>
@@ -238,6 +273,12 @@ export default function ProjectWorkspace() {
               skill={skill}
               selected={selectedSkills.has(skill.name)}
               onSelect={() => toggleSkillSelection(skill.name)}
+              onDeleteSkill={handleDeleteSkill}
+              onEditAgents={() => {
+                // TODO: Phase 6 - Open EditSkillAgentsDialog
+                alert('修改工具功能即将推出')
+              }}
+              onImportToCenter={handleImportToCenter}
             />
           ))}
         </div>
@@ -292,7 +333,21 @@ function getAgentBadgeClass(agent: string): string {
   return map[agent] ?? 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
 }
 
-function ProjectSkillCard({ skill, selected, onSelect }: { skill: ProjectSkillInfo; selected: boolean; onSelect: () => void }) {
+function ProjectSkillCard({
+  skill,
+  selected,
+  onSelect,
+  onDeleteSkill,
+  onEditAgents,
+  onImportToCenter,
+}: {
+  skill: ProjectSkillInfo
+  selected: boolean
+  onSelect: () => void
+  onDeleteSkill: (name: string, agent: string) => void
+  onEditAgents: (name: string, agent: string) => void
+  onImportToCenter: (name: string) => void
+}) {
   const { t } = useTranslation()
   return (
     <Card
@@ -306,9 +361,18 @@ function ProjectSkillCard({ skill, selected, onSelect }: { skill: ProjectSkillIn
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-base font-semibold text-foreground">{skill.name}</h3>
           </div>
-          <span className={`inline-flex h-5 shrink-0 items-center rounded-full px-1.5 text-[10px] font-medium ${getSyncStatusColor(skill.sync_status)}`}>
-            {getSyncStatusLabel(skill.sync_status)}
-          </span>
+          <div className="flex items-center gap-1 shrink-0">
+            <span className={`inline-flex h-5 items-center rounded-full px-1.5 text-[10px] font-medium ${getSyncStatusColor(skill.sync_status)}`}>
+              {getSyncStatusLabel(skill.sync_status)}
+            </span>
+            <SkillActionMenu
+              skillName={skill.name}
+              agent={skill.agent}
+              onEditAgents={() => onEditAgents(skill.name, skill.agent)}
+              onDelete={() => onDeleteSkill(skill.name, skill.agent)}
+              onImportToCenter={() => onImportToCenter(skill.name)}
+            />
+          </div>
         </div>
 
         {skill.description && (
@@ -334,7 +398,21 @@ function ProjectSkillCard({ skill, selected, onSelect }: { skill: ProjectSkillIn
   )
 }
 
-function ProjectSkillRow({ skill, selected, onSelect }: { skill: ProjectSkillInfo; selected: boolean; onSelect: () => void }) {
+function ProjectSkillRow({
+  skill,
+  selected,
+  onSelect,
+  onDeleteSkill,
+  onEditAgents,
+  onImportToCenter,
+}: {
+  skill: ProjectSkillInfo
+  selected: boolean
+  onSelect: () => void
+  onDeleteSkill: (name: string, agent: string) => void
+  onEditAgents: (name: string, agent: string) => void
+  onImportToCenter: (name: string) => void
+}) {
   const { t } = useTranslation()
   return (
     <div
@@ -359,6 +437,13 @@ function ProjectSkillRow({ skill, selected, onSelect }: { skill: ProjectSkillInf
       <span className={`inline-flex h-5 items-center rounded-full px-1.5 text-[10px] font-medium ${getSyncStatusColor(skill.sync_status)}`}>
         {getSyncStatusLabel(skill.sync_status)}
       </span>
+      <SkillActionMenu
+        skillName={skill.name}
+        agent={skill.agent}
+        onEditAgents={() => onEditAgents(skill.name, skill.agent)}
+        onDelete={() => onDeleteSkill(skill.name, skill.agent)}
+        onImportToCenter={() => onImportToCenter(skill.name)}
+      />
     </div>
   )
 }
