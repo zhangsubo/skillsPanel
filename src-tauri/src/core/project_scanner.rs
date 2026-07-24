@@ -308,6 +308,76 @@ impl ProjectScanner {
 
         Ok(())
     }
+
+    /// 获取 agent 对应的 skills 目录路径
+    fn get_agent_skill_dir(agent: &str) -> Result<&'static str, AppError> {
+        match agent {
+            "claude-code" => Ok(".claude/skills"),
+            "cursor" => Ok(".cursor/skills"),
+            "opencode" => Ok(".config/opencode/skill"),
+            "codex" => Ok(".codex/skills"),
+            "agents" => Ok(".agents/skills"),
+            _ => Err(AppError::Validation(format!("Unknown agent: {}", agent))),
+        }
+    }
+
+    /// 从项目中删除指定 agent 目录下的 skill
+    pub fn delete_project_skill(
+        project_root: &str,
+        skill_name: &str,
+        agent: &str,
+    ) -> Result<(), AppError> {
+        let agent_dir = Self::get_agent_skill_dir(agent)?;
+        let target = Path::new(project_root).join(agent_dir).join(skill_name);
+
+        if !target.exists() {
+            return Err(AppError::SkillNotFound(format!(
+                "Skill '{}' not found in {} directory",
+                skill_name, agent
+            )));
+        }
+
+        // 删除目录
+        fs::remove_dir_all(&target)?;
+        Ok(())
+    }
+
+    /// 批量导出到多个 agent
+    pub fn export_to_multiple_agents(
+        database: &Database,
+        skill_name: &str,
+        project_root: &str,
+        agents: &[String],
+        library: &crate::core::library::SkillLibrary,
+    ) -> Result<Vec<String>, AppError> {
+        let mut success = Vec::new();
+        let mut errors = Vec::new();
+
+        for agent in agents {
+            match Self::export_center_skill_to_project(
+                database,
+                skill_name,
+                project_root,
+                agent,
+                library,
+            ) {
+                Ok(_) => success.push(agent.clone()),
+                Err(e) => {
+                    errors.push(format!("{}: {:?}", agent, e));
+                }
+            }
+        }
+
+        // 如果全部失败，返回错误
+        if success.is_empty() && !errors.is_empty() {
+            return Err(AppError::Validation(format!(
+                "Failed to export to all agents: {}",
+                errors.join(", ")
+            )));
+        }
+
+        Ok(success)
+    }
 }
 
 #[cfg(test)]

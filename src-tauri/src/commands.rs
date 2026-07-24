@@ -1136,6 +1136,127 @@ pub fn export_skill_to_project(
 }
 
 #[tauri::command]
+pub fn delete_project_skill(
+    state: State<'_, SharedState>,
+    project_id: String,
+    skill_name: String,
+    agent: String,
+) -> Result<(), AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.clone();
+
+    let projects_repo = crate::core::database::ProjectsRepository::new(&database);
+    let project = projects_repo
+        .get_by_id(&project_id)?
+        .ok_or_else(|| AppError::SkillNotFound(format!("Project not found: {}", project_id)))?;
+
+    crate::core::project_scanner::ProjectScanner::delete_project_skill(
+        &project.root_path,
+        &skill_name,
+        &agent,
+    )
+}
+
+#[tauri::command]
+pub fn export_skill_to_project_multi(
+    state: State<'_, SharedState>,
+    project_id: String,
+    skill_name: String,
+    agents: Vec<String>,
+) -> Result<Vec<String>, AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.clone();
+    let library = state.library.lock().unwrap();
+
+    let projects_repo = crate::core::database::ProjectsRepository::new(&database);
+    let project = projects_repo
+        .get_by_id(&project_id)?
+        .ok_or_else(|| AppError::SkillNotFound(format!("Project not found: {}", project_id)))?;
+
+    crate::core::project_scanner::ProjectScanner::export_to_multiple_agents(
+        &database,
+        &skill_name,
+        &project.root_path,
+        &agents,
+        &library,
+    )
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct UpdateResult {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+    pub unchanged: Vec<String>,
+}
+
+#[tauri::command]
+pub fn update_project_skill_agents(
+    state: State<'_, SharedState>,
+    project_id: String,
+    skill_name: String,
+    current_agents: Vec<String>,
+    target_agents: Vec<String>,
+) -> Result<UpdateResult, AppError> {
+    let state = state.lock().unwrap();
+    let database = state.database.clone();
+    let library = state.library.lock().unwrap();
+
+    let projects_repo = crate::core::database::ProjectsRepository::new(&database);
+    let project = projects_repo
+        .get_by_id(&project_id)?
+        .ok_or_else(|| AppError::SkillNotFound(format!("Project not found: {}", project_id)))?;
+
+    // 计算差异
+    let current_set: std::collections::HashSet<_> = current_agents.iter().collect();
+    let target_set: std::collections::HashSet<_> = target_agents.iter().collect();
+
+    let to_add: Vec<String> = target_set
+        .difference(&current_set)
+        .map(|s| (*s).clone())
+        .collect();
+    let to_remove: Vec<String> = current_set
+        .difference(&target_set)
+        .map(|s| (*s).clone())
+        .collect();
+    let unchanged: Vec<String> = current_set
+        .intersection(&target_set)
+        .map(|s| (*s).clone())
+        .collect();
+
+    // 执行删除
+    for agent in &to_remove {
+        crate::core::project_scanner::ProjectScanner::delete_project_skill(
+            &project.root_path,
+            &skill_name,
+            agent,
+        )?;
+    }
+
+    // 执行添加
+    let mut added = Vec::new();
+    for agent in &to_add {
+        match crate::core::project_scanner::ProjectScanner::export_center_skill_to_project(
+            &database,
+            &skill_name,
+            &project.root_path,
+            agent,
+            &library,
+        ) {
+            Ok(_) => added.push(agent.clone()),
+            Err(e) => {
+                eprintln!("Failed to add to {}: {:?}", agent, e);
+            }
+        }
+    }
+
+    Ok(UpdateResult {
+        added,
+        removed: to_remove,
+        unchanged,
+    })
+}
+
+#[tauri::command]
 pub fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }

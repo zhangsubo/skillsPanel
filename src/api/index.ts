@@ -219,6 +219,20 @@ const MOCK_COMMANDS: Record<string, (args?: Record<string, unknown>) => unknown>
   }),
   import_project_skill: () => '/mock/library/imported-skill',
   export_skill_to_project: () => undefined,
+  delete_project_skill: () => undefined,
+  export_skill_to_project_multi: (args) => {
+    const a = args as { agents: string[] };
+    return a.agents || [];
+  },
+  update_project_skill_agents: (args) => {
+    const a = args as { currentAgents: string[]; targetAgents: string[] };
+    const current = new Set(a.currentAgents || []);
+    const target = new Set(a.targetAgents || []);
+    const added = [...target].filter(x => !current.has(x));
+    const removed = [...current].filter(x => !target.has(x));
+    const unchanged = [...current].filter(x => target.has(x));
+    return { added, removed, unchanged };
+  },
 
   sync_list_providers: () => [] as SyncProvider[],
   sync_add_provider: () => ({ id: 'mock', name: 'Mock Provider', kind: 'webdav', config_json: '{}', enabled: true, last_sync_at: null, last_sync_status: null, last_sync_error: null, created_at: new Date().toISOString() } as SyncProvider),

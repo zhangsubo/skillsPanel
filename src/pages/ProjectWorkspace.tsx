@@ -6,19 +6,13 @@ import { useNavigate } from 'react-router-dom'
 import { confirm } from '@tauri-apps/plugin-dialog'
 import { useProjects } from '@/hooks/use-projects'
 import { getInstalledSkillsFromDb } from '@/api/database'
-import { exportSkillToProject } from '@/api/projects'
+import { exportSkillToProjectMulti } from '@/api/projects'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { AgentCheckboxGroup } from '@/components/project/AgentCheckboxGroup'
 import type { ProjectSkillInfo, Skill } from '@/types'
 
 type FilterMode = 'all' | 'enabled' | 'disabled'
@@ -387,7 +381,7 @@ function AddSkillToProjectDialog({
   const [searchQuery, setSearchQuery] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [submitting, setSubmitting] = useState(false)
-  const [targetAgent, setTargetAgent] = useState<string>('claude-code')
+  const [targetAgents, setTargetAgents] = useState<string[]>(['claude-code'])
 
   useEffect(() => {
     let cancelled = false
@@ -426,12 +420,12 @@ function AddSkillToProjectDialog({
   }, [])
 
   const handleSubmit = async () => {
-    if (selected.size === 0) return
+    if (selected.size === 0 || targetAgents.length === 0) return
     setSubmitting(true)
     setError(null)
     try {
       for (const name of selected) {
-        await exportSkillToProject(projectId, name, targetAgent)
+        await exportSkillToProjectMulti(projectId, name, targetAgents)
       }
       onAdded()
     } catch (err) {
@@ -457,20 +451,13 @@ function AddSkillToProjectDialog({
         <div className="mt-4 space-y-3">
           <div>
             <label className="mb-1.5 block text-xs font-medium text-foreground">
-              {t('project.targetAgent')}
+              {t('project.targetAgents')}
             </label>
-            <Select value={targetAgent} onValueChange={setTargetAgent}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="claude-code">Claude Code</SelectItem>
-                <SelectItem value="cursor">Cursor</SelectItem>
-                <SelectItem value="opencode">OpenCode</SelectItem>
-                <SelectItem value="codex">Codex</SelectItem>
-                <SelectItem value="agents">Agents</SelectItem>
-              </SelectContent>
-            </Select>
+            <AgentCheckboxGroup
+              value={targetAgents}
+              onChange={setTargetAgents}
+              disabled={submitting}
+            />
           </div>
 
           <div className="relative">
