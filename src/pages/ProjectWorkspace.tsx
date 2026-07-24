@@ -14,6 +14,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AgentCheckboxGroup } from '@/components/project/AgentCheckboxGroup'
 import { SkillActionMenu } from '@/components/project/SkillActionMenu'
+import { EditSkillAgentsDialog } from '@/components/project/EditSkillAgentsDialog'
 import type { ProjectSkillInfo, Skill } from '@/types'
 
 type FilterMode = 'all' | 'enabled' | 'disabled'
@@ -51,6 +52,7 @@ export default function ProjectWorkspace() {
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set())
   const [showAddSkillDialog, setShowAddSkillDialog] = useState(false)
+  const [editingSkill, setEditingSkill] = useState<{ name: string; agent: string } | null>(null)
 
   const project = projects.find((p) => p.id === projectId)
 
@@ -257,10 +259,7 @@ export default function ProjectWorkspace() {
               selected={selectedSkills.has(skill.name)}
               onSelect={() => toggleSkillSelection(skill.name)}
               onDeleteSkill={handleDeleteSkill}
-              onEditAgents={() => {
-                // TODO: Phase 6 - Open EditSkillAgentsDialog
-                alert('修改工具功能即将推出')
-              }}
+              onEditAgents={(name, agent) => setEditingSkill({ name, agent })}
               onImportToCenter={handleImportToCenter}
             />
           ))}
@@ -274,10 +273,7 @@ export default function ProjectWorkspace() {
               selected={selectedSkills.has(skill.name)}
               onSelect={() => toggleSkillSelection(skill.name)}
               onDeleteSkill={handleDeleteSkill}
-              onEditAgents={() => {
-                // TODO: Phase 6 - Open EditSkillAgentsDialog
-                alert('修改工具功能即将推出')
-              }}
+              onEditAgents={(name, agent) => setEditingSkill({ name, agent })}
               onImportToCenter={handleImportToCenter}
             />
           ))}
@@ -291,6 +287,19 @@ export default function ProjectWorkspace() {
           onClose={() => setShowAddSkillDialog(false)}
           onAdded={() => {
             setShowAddSkillDialog(false)
+            handleRefresh()
+          }}
+        />
+      )}
+
+      {editingSkill && projectId && (
+        <EditSkillAgentsDialog
+          projectId={projectId}
+          skillName={editingSkill.name}
+          currentAgent={editingSkill.agent}
+          onClose={() => setEditingSkill(null)}
+          onUpdated={() => {
+            setEditingSkill(null)
             handleRefresh()
           }}
         />
