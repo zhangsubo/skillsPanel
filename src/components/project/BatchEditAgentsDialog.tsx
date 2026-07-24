@@ -23,6 +23,7 @@ export function BatchEditAgentsDialog({
   const [selectedAgents, setSelectedAgents] = useState<string[]>(['claude-code'])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [progress, setProgress] = useState({ current: 0, total: 0 })
 
   const handleSubmit = async () => {
     if (selectedAgents.length === 0) {
@@ -32,12 +33,16 @@ export function BatchEditAgentsDialog({
 
     setSubmitting(true)
     setError(null)
+    setProgress({ current: 0, total: skills.length })
 
     try {
       let totalAdded = 0
       let totalRemoved = 0
 
-      for (const skill of skills) {
+      for (let i = 0; i < skills.length; i++) {
+        const skill = skills[i]
+        setProgress({ current: i + 1, total: skills.length })
+
         const result = await updateProjectSkillAgents(
           projectId,
           skill.name,
@@ -59,6 +64,7 @@ export function BatchEditAgentsDialog({
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSubmitting(false)
+      setProgress({ current: 0, total: 0 })
     }
   }
 
@@ -78,6 +84,17 @@ export function BatchEditAgentsDialog({
           {t('project.batchEditAgentsDesc', { count: skills.length })}
         </p>
 
+        <div className="mt-3 max-h-32 overflow-y-auto rounded-md border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-800">
+          <div className="text-xs text-muted-foreground">
+            {skills.map((skill) => (
+              <div key={skill.name} className="flex items-center justify-between py-1">
+                <span>{skill.name}</span>
+                <span className="text-[10px] opacity-60">{skill.agent}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div className="mt-4">
           <AgentCheckboxGroup
             value={selectedAgents}
@@ -94,12 +111,27 @@ export function BatchEditAgentsDialog({
           <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>
         )}
 
+        {submitting && progress.total > 0 && (
+          <div className="mt-3">
+            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+              <span>处理进度</span>
+              <span>{progress.current} / {progress.total}</span>
+            </div>
+            <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden dark:bg-gray-700">
+              <div
+                className="h-full bg-primary transition-all duration-300"
+                style={{ width: `${(progress.current / progress.total) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         <div className="mt-6 flex items-center justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={submitting}>
             {t('library.cancel')}
           </Button>
           <Button onClick={handleSubmit} disabled={submitting || selectedAgents.length === 0}>
-            {submitting ? '处理中...' : '应用到全部'}
+            {submitting ? `处理中... (${progress.current}/${progress.total})` : '应用到全部'}
           </Button>
         </div>
       </div>

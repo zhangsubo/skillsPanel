@@ -49,6 +49,7 @@ export default function ProjectWorkspace() {
   }
 
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
   const [filterMode, setFilterMode] = useState<FilterMode>('all')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set())
@@ -57,6 +58,14 @@ export default function ProjectWorkspace() {
   const [showBatchEditDialog, setShowBatchEditDialog] = useState(false)
 
   const project = projects.find((p) => p.id === projectId)
+
+  // 防抖搜索
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
 
   useEffect(() => {
     if (projectId && projectId !== projectDetail?.project.id) {
@@ -67,8 +76,8 @@ export default function ProjectWorkspace() {
   const filteredSkills = useMemo(() => {
     if (!projectDetail) return []
     let skills = projectDetail.skills
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
+    if (debouncedSearchQuery.trim()) {
+      const q = debouncedSearchQuery.toLowerCase()
       skills = skills.filter(
         (s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q),
       )
@@ -76,7 +85,7 @@ export default function ProjectWorkspace() {
     if (filterMode === 'enabled') skills = skills.filter((s) => s.enabled)
     if (filterMode === 'disabled') skills = skills.filter((s) => !s.enabled)
     return skills
-  }, [projectDetail, searchQuery, filterMode])
+  }, [projectDetail, debouncedSearchQuery, filterMode])
 
   const enabledCount = projectDetail?.skills.filter((s) => s.enabled).length ?? 0
   const totalCount = projectDetail?.skills.length ?? 0
@@ -136,10 +145,25 @@ export default function ProjectWorkspace() {
 
     try {
       const skillsToDelete = projectDetail?.skills.filter((s) => selectedSkills.has(s.name)) || []
+      let successCount = 0
+      let failCount = 0
+
       for (const skill of skillsToDelete) {
-        await deleteProjectSkill(projectId, skill.name, skill.agent)
+        try {
+          await deleteProjectSkill(projectId, skill.name, skill.agent)
+          successCount++
+        } catch (err) {
+          console.error(`Failed to delete ${skill.name}:`, err)
+          failCount++
+        }
       }
-      alert(t('project.batchDeleted', { count: skillsToDelete.length }))
+
+      if (failCount > 0) {
+        alert(t('project.batchDeleted', { count: successCount }) + `\n失败: ${failCount} 个`)
+      } else {
+        alert(t('project.batchDeleted', { count: successCount }))
+      }
+
       setSelectedSkills(new Set())
       await handleRefresh()
     } catch (err) {

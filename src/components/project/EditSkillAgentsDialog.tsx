@@ -25,6 +25,13 @@ export function EditSkillAgentsDialog({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // 计算变化预览
+  const changes = {
+    toAdd: selectedAgents.filter(a => a !== currentAgent),
+    toRemove: currentAgent && !selectedAgents.includes(currentAgent) ? [currentAgent] : [],
+    unchanged: selectedAgents.filter(a => a === currentAgent)
+  }
+
   const handleSubmit = async () => {
     if (selectedAgents.length === 0) {
       setError('请至少选择一个工具')
@@ -90,6 +97,27 @@ export function EditSkillAgentsDialog({
         <div className="mt-4 text-sm text-muted-foreground">
           {t('project.currentAgents')}: <span className="font-medium">{currentAgent}</span>
         </div>
+
+        {(changes.toAdd.length > 0 || changes.toRemove.length > 0) && (
+          <div className="mt-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-xs dark:border-blue-800 dark:bg-blue-900/20">
+            <div className="font-medium text-blue-900 dark:text-blue-100 mb-2">预览变化：</div>
+            {changes.toAdd.length > 0 && (
+              <div className="text-green-700 dark:text-green-400">
+                ➕ 新增: {changes.toAdd.join(', ')}
+              </div>
+            )}
+            {changes.toRemove.length > 0 && (
+              <div className="text-red-700 dark:text-red-400">
+                ➖ 删除: {changes.toRemove.join(', ')}
+              </div>
+            )}
+            {changes.unchanged.length > 0 && (
+              <div className="text-gray-600 dark:text-gray-400">
+                ⚬ 保持: {changes.unchanged.join(', ')}
+              </div>
+            )}
+          </div>
+        )}
 
         {error && (
           <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>
