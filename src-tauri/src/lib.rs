@@ -189,6 +189,7 @@ pub fn run() {
             commands::sync_get_history,
             commands::sync_rclone_status,
             commands::sync_ensure_rclone,
+            commands::open_in_finder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -49,6 +49,7 @@
   "library.noAgents": "No agents available",
   "library.deleteSuccess": "Skill \"{{name}}\" deleted",
   "library.skillNotFound": "Skill not found",
+  "library.openInFinder": "Open in Finder",
   "settings.title": "Settings",
   "settings.tools": "Agent Management",
   "settings.toolsDesc": "Manage integrated agents",
@@ -202,6 +203,7 @@
   "project.filter.disabled": "Disabled",
   "project.scopeProject": "Project only",
   "project.syncEnabled": "Sync status: Enabled",
+  "project.partiallyEnabled": "Sync status: Partially enabled",
   "project.noSkills": "No skills in this project.",
 
   "detail.tags": "Tags",

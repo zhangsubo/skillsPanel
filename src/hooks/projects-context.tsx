@@ -6,6 +6,8 @@ export type ProjectsContextValue = {
   projects: Project[]
   selectedProjectId: string | null
   projectDetail: ProjectDto | null
+  /** 项目ID → 启用的skill数量的映射（缓存） */
+  projectSkillCounts: Record<string, number>
   loading: boolean
   scanning: boolean
   error: Error | null
@@ -27,6 +29,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [projectDetail, setProjectDetail] = useState<ProjectDto | null>(null)
+  const [projectSkillCounts, setProjectSkillCounts] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<Error | null>(null)
@@ -58,6 +61,15 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
     try {
       const detail = await scanProject(projectId)
       setProjectDetail(detail)
+      // 缓存启用的 skill 数量（按 skill 聚合，不是 skill+agent 组合）
+      const skillNames = new Set<string>()
+      for (const skill of detail.skills) {
+        if (skill.enabled) {
+          skillNames.add(skill.name)
+        }
+      }
+      const enabledCount = skillNames.size
+      setProjectSkillCounts((prev) => ({ ...prev, [projectId]: enabledCount }))
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
     } finally {
@@ -85,6 +97,11 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
         }
         return current
       })
+      // 清除缓存的 skill 数量
+      setProjectSkillCounts((prev) => {
+        const { [projectId]: _, ...rest } = prev
+        return rest
+      })
       await refresh()
     },
     [refresh],
@@ -99,6 +116,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
     projects,
     selectedProjectId,
     projectDetail,
+    projectSkillCounts,
     loading,
     scanning,
     error,

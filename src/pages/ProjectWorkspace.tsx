@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { AgentCheckboxGroup } from '@/components/project/AgentCheckboxGroup'
+import { AgentMultiSelect } from '@/components/project/AgentMultiSelect'
 import { SkillActionMenu } from '@/components/project/SkillActionMenu'
 import { EditSkillAgentsDialog } from '@/components/project/EditSkillAgentsDialog'
 import { BatchEditAgentsDialog } from '@/components/project/BatchEditAgentsDialog'
@@ -20,6 +20,18 @@ import type { ProjectSkillInfo, Skill } from '@/types'
 
 type FilterMode = 'all' | 'enabled' | 'disabled'
 type ViewMode = 'grid' | 'list'
+
+/** 聚合后的项目skill：同一个skill的不同agent合并展示 */
+interface AggregatedProjectSkill {
+  name: string
+  description: string
+  agents: string[] // 该skill配置的所有agents
+  enabled: boolean // 至少有一个agent启用
+  allEnabled: boolean // 所有agents都启用
+  sync_status: ProjectSkillInfo['sync_status'] // 使用第一个的状态（简化）
+  in_center: boolean
+  center_skill_id: string | null
+}
 
 export default function ProjectWorkspace() {
   const { t } = useTranslation()
@@ -54,7 +66,7 @@ export default function ProjectWorkspace() {
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set())
   const [showAddSkillDialog, setShowAddSkillDialog] = useState(false)
-  const [editingSkill, setEditingSkill] = useState<{ name: string; agent: string } | null>(null)
+  const [editingSkill, setEditingSkill] = useState<{ name: string; agents: string[] } | null>(null)
   const [showBatchEditDialog, setShowBatchEditDialog] = useState(false)
 
   const project = projects.find((p) => p.id === projectId)
@@ -73,9 +85,36 @@ export default function ProjectWorkspace() {
     }
   }, [projectId, projectDetail?.project.id, selectProject])
 
-  const filteredSkills = useMemo(() => {
+  // 聚合：将同一个skill的不同agent合并
+  const aggregatedSkills = useMemo(() => {
     if (!projectDetail) return []
-    let skills = projectDetail.skills
+    const skillMap = new Map<string, AggregatedProjectSkill>()
+
+    for (const skill of projectDetail.skills) {
+      const existing = skillMap.get(skill.name)
+      if (existing) {
+        existing.agents.push(skill.agent)
+        existing.enabled = existing.enabled || skill.enabled
+        existing.allEnabled = existing.allEnabled && skill.enabled
+      } else {
+        skillMap.set(skill.name, {
+          name: skill.name,
+          description: skill.description,
+          agents: [skill.agent],
+          enabled: skill.enabled,
+          allEnabled: skill.enabled,
+          sync_status: skill.sync_status,
+          in_center: skill.in_center,
+          center_skill_id: skill.center_skill_id,
+        })
+      }
+    }
+
+    return Array.from(skillMap.values())
+  }, [projectDetail])
+
+  const filteredSkills = useMemo(() => {
+    let skills = aggregatedSkills
     if (debouncedSearchQuery.trim()) {
       const q = debouncedSearchQuery.toLowerCase()
       skills = skills.filter(
@@ -85,10 +124,10 @@ export default function ProjectWorkspace() {
     if (filterMode === 'enabled') skills = skills.filter((s) => s.enabled)
     if (filterMode === 'disabled') skills = skills.filter((s) => !s.enabled)
     return skills
-  }, [projectDetail, debouncedSearchQuery, filterMode])
+  }, [aggregatedSkills, debouncedSearchQuery, filterMode])
 
-  const enabledCount = projectDetail?.skills.filter((s) => s.enabled).length ?? 0
-  const totalCount = projectDetail?.skills.length ?? 0
+  const enabledCount = aggregatedSkills.filter((s) => s.enabled).length
+  const totalCount = aggregatedSkills.length
 
   const toggleSkillSelection = (name: string) => {
     setSelectedSkills((prev) => {
@@ -103,17 +142,24 @@ export default function ProjectWorkspace() {
     if (projectId) await selectProject(projectId)
   }
 
-  const handleDeleteSkill = async (skillName: string, agent: string) => {
+  const handleDeleteSkill = async (skillName: string, agents: string[]) => {
     if (!projectId) return
-    const confirmed = await confirm(t('project.confirmDeleteSkill', { name: skillName }), {
-      title: t('project.deleteSkillTitle'),
-      kind: 'warning',
-    })
+    const agentList = agents.join(', ')
+    const confirmed = await confirm(
+      t('project.confirmDeleteSkill', { name: skillName }) + `\n工具: ${agentList}`,
+      {
+        title: t('project.deleteSkillTitle'),
+        kind: 'warning',
+      }
+    )
     if (!confirmed) return
 
     try {
-      await deleteProjectSkill(projectId, skillName, agent)
-      alert(t('project.skillDeleted', { name: skillName, agent }))
+      // 删除所有agents下的该skill
+      for (const agent of agents) {
+        await deleteProjectSkill(projectId, skillName, agent)
+      }
+      alert(t('project.skillDeleted', { name: skillName, agent: agentList }))
       await handleRefresh()
     } catch (err) {
       alert(`删除失败: ${err instanceof Error ? err.message : String(err)}`)
@@ -144,13 +190,16 @@ export default function ProjectWorkspace() {
     if (!confirmed) return
 
     try {
-      const skillsToDelete = projectDetail?.skills.filter((s) => selectedSkills.has(s.name)) || []
+      const skillsToDelete = aggregatedSkills.filter((s) => selectedSkills.has(s.name))
       let successCount = 0
       let failCount = 0
 
       for (const skill of skillsToDelete) {
         try {
-          await deleteProjectSkill(projectId, skill.name, skill.agent)
+          // 删除该skill的所有agents
+          for (const agent of skill.agents) {
+            await deleteProjectSkill(projectId, skill.name, agent)
+          }
           successCount++
         } catch (err) {
           console.error(`Failed to delete ${skill.name}:`, err)
@@ -331,7 +380,7 @@ export default function ProjectWorkspace() {
               selected={selectedSkills.has(skill.name)}
               onSelect={() => toggleSkillSelection(skill.name)}
               onDeleteSkill={handleDeleteSkill}
-              onEditAgents={(name, agent) => setEditingSkill({ name, agent })}
+              onEditAgents={(name, agents) => setEditingSkill({ name, agents })}
               onImportToCenter={handleImportToCenter}
             />
           ))}
@@ -345,7 +394,7 @@ export default function ProjectWorkspace() {
               selected={selectedSkills.has(skill.name)}
               onSelect={() => toggleSkillSelection(skill.name)}
               onDeleteSkill={handleDeleteSkill}
-              onEditAgents={(name, agent) => setEditingSkill({ name, agent })}
+              onEditAgents={(name, agents) => setEditingSkill({ name, agents })}
               onImportToCenter={handleImportToCenter}
             />
           ))}
@@ -368,7 +417,7 @@ export default function ProjectWorkspace() {
         <EditSkillAgentsDialog
           projectId={projectId}
           skillName={editingSkill.name}
-          currentAgent={editingSkill.agent}
+          currentAgents={editingSkill.agents}
           onClose={() => setEditingSkill(null)}
           onUpdated={() => {
             setEditingSkill(null)
@@ -435,11 +484,11 @@ function ProjectSkillCard({
   onEditAgents,
   onImportToCenter,
 }: {
-  skill: ProjectSkillInfo
+  skill: AggregatedProjectSkill
   selected: boolean
   onSelect: () => void
-  onDeleteSkill: (name: string, agent: string) => void
-  onEditAgents: (name: string, agent: string) => void
+  onDeleteSkill: (name: string, agents: string[]) => void
+  onEditAgents: (name: string, agents: string[]) => void
   onImportToCenter: (name: string) => void
 }) {
   const { t } = useTranslation()
@@ -461,9 +510,9 @@ function ProjectSkillCard({
             </span>
             <SkillActionMenu
               skillName={skill.name}
-              agent={skill.agent}
-              onEditAgents={() => onEditAgents(skill.name, skill.agent)}
-              onDelete={() => onDeleteSkill(skill.name, skill.agent)}
+              agents={skill.agents}
+              onEditAgents={() => onEditAgents(skill.name, skill.agents)}
+              onDelete={() => onDeleteSkill(skill.name, skill.agents)}
               onImportToCenter={() => onImportToCenter(skill.name)}
             />
           </div>
@@ -477,14 +526,16 @@ function ProjectSkillCard({
           <span className="inline-flex h-6 items-center rounded-full bg-muted px-2 text-xs font-medium text-muted-foreground">
             {t('project.scopeProject')}
           </span>
-          <span className={`inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ${getAgentBadgeClass(skill.agent)}`}>
-            {skill.agent}
-          </span>
+          {skill.agents.map((agent) => (
+            <span key={agent} className={`inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ${getAgentBadgeClass(agent)}`}>
+              {agent}
+            </span>
+          ))}
         </div>
 
         {skill.enabled && (
           <div className="mt-2 text-xs text-green-600 dark:text-green-400">
-            {t('project.syncEnabled')}
+            {skill.allEnabled ? t('project.syncEnabled') : t('project.partiallyEnabled')}
           </div>
         )}
       </CardContent>
@@ -500,11 +551,11 @@ function ProjectSkillRow({
   onEditAgents,
   onImportToCenter,
 }: {
-  skill: ProjectSkillInfo
+  skill: AggregatedProjectSkill
   selected: boolean
   onSelect: () => void
-  onDeleteSkill: (name: string, agent: string) => void
-  onEditAgents: (name: string, agent: string) => void
+  onDeleteSkill: (name: string, agents: string[]) => void
+  onEditAgents: (name: string, agents: string[]) => void
   onImportToCenter: (name: string) => void
 }) {
   const { t } = useTranslation()
@@ -525,17 +576,19 @@ function ProjectSkillRow({
       <span className="inline-flex h-6 items-center rounded-full bg-muted px-2 text-xs font-medium text-muted-foreground">
         {t('project.scopeProject')}
       </span>
-      <span className={`inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ${getAgentBadgeClass(skill.agent)}`}>
-        {skill.agent}
-      </span>
+      {skill.agents.map((agent) => (
+        <span key={agent} className={`inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ${getAgentBadgeClass(agent)}`}>
+          {agent}
+        </span>
+      ))}
       <span className={`inline-flex h-5 items-center rounded-full px-1.5 text-[10px] font-medium ${getSyncStatusColor(skill.sync_status)}`}>
         {getSyncStatusLabel(skill.sync_status)}
       </span>
       <SkillActionMenu
         skillName={skill.name}
-        agent={skill.agent}
-        onEditAgents={() => onEditAgents(skill.name, skill.agent)}
-        onDelete={() => onDeleteSkill(skill.name, skill.agent)}
+        agents={skill.agents}
+        onEditAgents={() => onEditAgents(skill.name, skill.agents)}
+        onDelete={() => onDeleteSkill(skill.name, skill.agents)}
         onImportToCenter={() => onImportToCenter(skill.name)}
       />
     </div>
@@ -616,7 +669,7 @@ function AddSkillToProjectDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="flex h-[500px] w-[500px] flex-col rounded-lg bg-white p-6 shadow-xl dark:bg-gray-900">
+      <div className="flex h-[600px] w-[500px] flex-col rounded-lg bg-white p-6 shadow-xl dark:bg-gray-900">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-foreground">{t('project.addSkill')}</h3>
           <button onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-muted">
@@ -632,7 +685,7 @@ function AddSkillToProjectDialog({
             <label className="mb-1.5 block text-xs font-medium text-foreground">
               {t('project.targetAgents')}
             </label>
-            <AgentCheckboxGroup
+            <AgentMultiSelect
               value={targetAgents}
               onChange={setTargetAgents}
               disabled={submitting}
@@ -650,33 +703,37 @@ function AddSkillToProjectDialog({
           </div>
         </div>
 
-        <div className="mt-3 flex-1 overflow-y-auto">
+        <div className="mt-4 flex-1 overflow-y-auto rounded-md border border-gray-200 dark:border-gray-700">
           {loading ? (
-            <div className="space-y-2">
+            <div className="space-y-2 p-3">
               {Array.from({ length: 4 }).map((_, i) => (
                 <Skeleton key={i} className="h-14 w-full" />
               ))}
             </div>
           ) : error ? (
-            <p className="py-4 text-center text-sm text-red-600">{error}</p>
+            <p className="py-8 text-center text-sm text-red-600">{error}</p>
           ) : filtered.length === 0 ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">
+            <p className="py-8 text-center text-sm text-muted-foreground">
               {t('project.noSkills')}
             </p>
           ) : (
-            <div className="space-y-1">
+            <div className="divide-y divide-gray-200 dark:divide-gray-700">
               {filtered.map((skill) => (
                 <button
                   key={skill.name}
                   onClick={() => toggle(skill.name)}
-                  className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition-colors ${
                     selected.has(skill.name)
                       ? 'bg-primary/10 text-primary'
                       : 'hover:bg-muted text-foreground'
                   }`}
                 >
-                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded border">
-                    {selected.has(skill.name) && <Check className="h-3.5 w-3.5" />}
+                  <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
+                    selected.has(skill.name)
+                      ? 'border-primary bg-primary'
+                      : 'border-gray-300 dark:border-gray-600'
+                  }`}>
+                    {selected.has(skill.name) && <Check className="h-3.5 w-3.5 text-white" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="font-medium">{skill.name}</p>

@@ -13,7 +13,7 @@ const navKeys = [
 export default function Sidebar() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { projects, selectedProjectId, selectProject } = useProjects();
+  const { projects, selectedProjectId, selectProject, projectSkillCounts } = useProjects();
   const [showAddDialog, setShowAddDialog] = useState(false);
 
   return (
@@ -68,6 +68,7 @@ export default function Sidebar() {
           ) : (
             projects.map((project, index) => {
               const isSelected = selectedProjectId === project.id;
+              const skillCount = projectSkillCounts[project.id];
               return (
                 <div key={project.id}>
                   <button
@@ -87,7 +88,7 @@ export default function Sidebar() {
                       {project.name}
                     </span>
                     <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-700 dark:text-gray-400">
-                      0
+                      {skillCount ?? '—'}
                     </span>
                   </button>
                   {index < projects.length - 1 && (

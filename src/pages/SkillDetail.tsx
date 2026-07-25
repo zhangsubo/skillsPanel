@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { invoke } from '@tauri-apps/api/core'
 import { useLibrary } from '@/hooks/use-library'
 import { useTags } from '@/hooks/use-tags'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,7 +16,7 @@ import {
 } from '@/components/ui/dialog'
 import { TagChip } from '@/components/TagChip'
 import { TagManagerDialog } from '@/components/TagManagerDialog'
-import { ArrowLeft, Folder, Loader2, Plus, Tag as TagIcon } from 'lucide-react'
+import { ArrowLeft, Folder, Loader2, Plus, Tag as TagIcon, ExternalLink } from 'lucide-react'
 import type { Tag } from '@/types'
 
 const safeErrorMessage = (e: unknown): string =>
@@ -209,6 +210,26 @@ export default function SkillDetail() {
     void fetchAttachedTags()
   }, [refreshTags, fetchAttachedTags])
 
+  const handleOpenPath = useCallback(async () => {
+    console.log('handleOpenPath called', skillWithStatus?.skill.library_path)
+    if (!skillWithStatus?.skill.library_path) {
+      console.log('No library_path available')
+      return
+    }
+    try {
+      const path = skillWithStatus.skill.library_path
+      console.log('Opening path:', path)
+
+      // 调用自定义的 Tauri 命令打开文件夹
+      await invoke('open_in_finder', { path })
+
+      console.log('Path opened successfully')
+    } catch (err) {
+      console.error('Failed to open path:', err)
+      alert(`无法打开路径: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }, [skillWithStatus?.skill.library_path])
+
   const attachedTagIds = useMemo(
     () => new Set(attachedTags.map((t) => t.id)),
     [attachedTags],
@@ -267,11 +288,16 @@ export default function SkillDetail() {
       </div>
 
       <Card>
-        <CardContent className="flex items-center gap-3 p-4">
+        <CardContent
+          className="flex items-center gap-3 p-4 cursor-pointer hover:bg-muted/50 transition-colors group"
+          onClick={handleOpenPath}
+          title={t('library.openInFinder') || '在访达中打开'}
+        >
           <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="truncate text-sm text-muted-foreground" title={skill.library_path}>
+          <span className="truncate text-sm text-muted-foreground flex-1" title={skill.library_path}>
             {skill.library_path}
           </span>
+          <ExternalLink className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
         </CardContent>
       </Card>
 

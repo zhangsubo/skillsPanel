@@ -8,7 +8,7 @@ import { updateProjectSkillAgents } from '@/api/projects'
 interface EditSkillAgentsDialogProps {
   projectId: string
   skillName: string
-  currentAgent: string
+  currentAgents: string[]
   onClose: () => void
   onUpdated: () => void
 }
@@ -16,20 +16,20 @@ interface EditSkillAgentsDialogProps {
 export function EditSkillAgentsDialog({
   projectId,
   skillName,
-  currentAgent,
+  currentAgents,
   onClose,
   onUpdated,
 }: EditSkillAgentsDialogProps) {
   const { t } = useTranslation()
-  const [selectedAgents, setSelectedAgents] = useState<string[]>([currentAgent])
+  const [selectedAgents, setSelectedAgents] = useState<string[]>(currentAgents)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // 计算变化预览
   const changes = {
-    toAdd: selectedAgents.filter(a => a !== currentAgent),
-    toRemove: currentAgent && !selectedAgents.includes(currentAgent) ? [currentAgent] : [],
-    unchanged: selectedAgents.filter(a => a === currentAgent)
+    toAdd: selectedAgents.filter(a => !currentAgents.includes(a)),
+    toRemove: currentAgents.filter(a => !selectedAgents.includes(a)),
+    unchanged: selectedAgents.filter(a => currentAgents.includes(a))
   }
 
   const handleSubmit = async () => {
@@ -45,7 +45,7 @@ export function EditSkillAgentsDialog({
       const result = await updateProjectSkillAgents(
         projectId,
         skillName,
-        [currentAgent],
+        currentAgents,
         selectedAgents
       )
 
@@ -95,7 +95,7 @@ export function EditSkillAgentsDialog({
         </div>
 
         <div className="mt-4 text-sm text-muted-foreground">
-          {t('project.currentAgents')}: <span className="font-medium">{currentAgent}</span>
+          {t('project.currentAgents')}: <span className="font-medium">{currentAgents.join(', ')}</span>
         </div>
 
         {(changes.toAdd.length > 0 || changes.toRemove.length > 0) && (

@@ -49,6 +49,7 @@
   "library.noAgents": "暂无可用 Agent",
   "library.deleteSuccess": "Skill \"{{name}}\" 已删除",
   "library.skillNotFound": "未找到该 Skills",
+  "library.openInFinder": "在访达中打开",
   "settings.title": "设置",
   "settings.tools": "Agent 管理",
   "settings.toolsDesc": "管理已集成到系统的 Agent 列表",
@@ -202,6 +203,7 @@
   "project.filter.disabled": "已停用",
   "project.scopeProject": "仅项目",
   "project.syncEnabled": "同步状态：已启用",
+  "project.partiallyEnabled": "同步状态：部分启用",
   "project.noSkills": "该项目中暂无 Skills。",
 
   "detail.tags": "标签",

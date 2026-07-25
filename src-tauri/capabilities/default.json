@@ -10,6 +10,7 @@
     "dialog:allow-confirm",
     "shell:default",
     "shell:allow-open",
+    "shell:allow-execute",
     "updater:default",
     "process:default"
   ]

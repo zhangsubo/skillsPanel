@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 
 interface SkillActionMenuProps {
   skillName: string
-  agent: string
+  agents: string[]
   onEditAgents: () => void
   onDelete: () => void
   onImportToCenter: () => void
